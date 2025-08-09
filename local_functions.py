@@ -177,3 +177,53 @@ def get_width(ref_image, model, cls_name):
                 x1, _, x2, _ = map(int, box.xyxy[0])
                 return x2 - x1
     return None
+
+
+def check_to_fast_lane(detected_lines: set) -> bool:
+    left_options = {
+        "left_solid_white",
+        "left_solid_yellow",
+        "left_double_solid_white",
+        "left_double_solid_yellow"
+    }
+
+    right_options = {
+        "right_broken_white",
+        "right_broken_yellow"
+    }
+
+    return any(left in detected_lines for left in left_options) and \
+           any(right in detected_lines for right in right_options)
+
+def is_lane_departure_and_fast_lane(model, frame, departure_threshold, frame_center_x, height):
+    detected_lines = set()
+    lanedeparture = False
+    fastlane = False
+    results = model.predict(source=frame)
+    for result in results:
+        classes_names = result.names
+        for box in result.boxes:
+            [x1, y1, x2, y2] = map(int, box.xyxy[0])
+            cls = int(box.cls[0])
+            class_name = classes_names[cls]
+            x_center = (x1 + x2) / 2
+             # Порог вероятности
+            threshold =  0.4
+            if box.conf[0] > threshold:
+                if  x_center < frame_center_x:
+                    class_name = "left_"+class_name
+                else:
+                    class_name = "right_"+class_name
+                detected_lines.add(class_name)
+                if abs(x_center - frame_center_x) < departure_threshold:
+                    lanedeparture = True
+                #     cv2.putText(frame, f"Lane departure", (50, 50), fonts, 1, (RED), 2)
+                # colour = getColours(cls)
+                # cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
+                # cv2.putText(frame, f'{class_name} {box.conf[0]:.2f}', (x1, y1),
+                #             cv2.FONT_HERSHEY_SIMPLEX, 1, colour, 2)
+    if check_to_fast_lane(detected_lines):
+        fastlane = True
+    # # Нарисовать вертикальную линию в центре кадра (машина)
+    # cv2.line(frame, (frame_center_x, 0), (frame_center_x, height), (200, 200, 200), 2)
+    return frame, lanedeparture, fastlane

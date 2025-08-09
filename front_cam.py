@@ -3,14 +3,15 @@ import time
 import platform
 from ultralytics import YOLO
 from local_functions import (
-    MODEL_PATH, FRONT_MODEL, LANE_MODEL, focal_length, distance_finder, get_width, getColours, play_alert
+    MODEL_PATH, FRONT_MODEL, LANE_MODEL, focal_length, distance_finder, get_width, getColours, play_alert, is_lane_departure_and_fast_lane
 )
 from collections import deque
-from lane_departure import is_lane_departure_and_fast_lane
 
 # Detect platform and set camera source
-camera_number = 1
-operation_system = platform.system()
+CAMERA_INDEX = 0
+CAMERA_INDEX_LINUX = 51
+os_name = platform.system()
+is_windows = os_name == 'Windows'
 
 # Define known measurements for distance estimation
 known_distance = {"truck": 7, "car": 7}  # meters
@@ -54,35 +55,29 @@ scale_factor = {
 }
 
 # Initialize video capture
-if operation_system == 'Windows':
-    cap = cv2.VideoCapture(camera_number, cv2.CAP_DSHOW)
-    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
+if is_windows:
+    cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
 else:
-    from nanocamera import Camera
-    cap = Camera(device_id=1, fps=30, width=1280, height=720, flip=0)
-    frame_width = cap.width
-    frame_height = cap.height
+    cap = cv2.VideoCapture(CAMERA_INDEX_LINUX)
+frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+
 
 middle_x = frame_width // 2
 departure_threshold = frame_width // 15
 
 # Main loop
 while True:
-    if operation_system == 'Windows':
-        ret, frame = cap.read()
-        if not ret:
-            continue
-    else:
-        frame = cap.read()
-        if frame is None:
-            continue
+    ret, frame = cap.read()
+    if not ret:
+        continue
 
     # Reset class detection buffer
     for cls in object_class:
         class_buffer[cls].append(0)
 
-    results = yolo(frame, stream=True)
+    results = yolo.predict(frame)
     for result in results:
         class_names = result.names
         for box in result.boxes:
