@@ -61,7 +61,7 @@ while True:
         continue
 
     frame_buffer.append(frame)
-    results = yolo(frame, stream=True)
+    results = yolo.predict(frame)
 
     for cls in VIOLATION_CLASSES:
         class_buffer[cls].append(0)
