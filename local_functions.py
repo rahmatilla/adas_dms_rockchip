@@ -134,7 +134,8 @@ def save_video(buffer, output_file, fps, audio_file=None):
     ]
     if audio_file:
         command += ["-i", audio_file, "-c:a", "aac", "-b:a", "96k"]
-    command += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "28", "-preset", "slow", "-shortest", output_file]
+    command += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "28", "-preset", "ultrafast", "-shortest", output_file]
+
     process = subprocess.Popen(command, stdin=subprocess.PIPE)
     for frame in frames:
         process.stdin.write(frame.astype(np.uint8).tobytes())
