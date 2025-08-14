@@ -67,56 +67,59 @@ frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 middle_x = frame_width // 2
 departure_threshold = frame_width // 15
 
+frame_id = 0
 # Main loop
 while True:
     ret, frame = cap.read()
     if not ret:
         continue
 
+    frame_id += 1
+
     # Reset class detection buffer
     for cls in object_class:
         class_buffer[cls].append(0)
+    if frame_id % 2 == 0:
+        results = yolo.predict(frame)
+        for result in results:
+            class_names = result.names
+            for box in result.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cls_id = int(box.cls[0])
+                class_name = class_names[cls_id]
 
-    results = yolo.predict(frame)
-    for result in results:
-        class_names = result.names
-        for box in result.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            cls_id = int(box.cls[0])
-            class_name = class_names[cls_id]
+                conf = float(box.conf[0])
+                if conf < 0.4:
+                    continue
 
-            conf = float(box.conf[0])
-            if conf < 0.4:
-                continue
+                class_buffer[class_name][-1] = 1
 
-            class_buffer[class_name][-1] = 1
+                # Estimate distance if object is centered
+                if x1 < middle_x < x2 and class_name in ["car", "truck"]:
+                    obj_width_in_frame = x2 - x1
+                    normalized_width = obj_width_in_frame / frame_width
+                    if normalized_width > 0:
+                        distance = scale_factor[class_name] / normalized_width
+                        cv2.putText(frame, f"Distance = {distance:.2f}m", (50, 50), fonts, 0.6, RED, 2)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (GREEN), 2)
+                        cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (GREEN), 2)
+                else:
+                    colour = getColours(cls_id)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
+                    cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
 
-            # Estimate distance if object is centered
-            if x1 < middle_x < x2 and class_name in ["car", "truck"]:
-                obj_width_in_frame = x2 - x1
-                normalized_width = obj_width_in_frame / frame_width
-                if normalized_width > 0:
-                    distance = scale_factor[class_name] / normalized_width
-                    cv2.putText(frame, f"Distance = {distance:.2f}m", (50, 50), fonts, 0.6, RED, 2)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (GREEN), 2)
-                    cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (GREEN), 2)
-            else:
-                colour = getColours(cls_id)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
-                cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
-
-    # Lane departure detection
-    frame, lane_departure, fast_lane = is_lane_departure_and_fast_lane(model_lane, frame, departure_threshold, middle_x, frame_height)
-    if lane_departure:
-        class_buffer["lane_departure"][-1] = 1
-    if fast_lane:
-        class_buffer["fast_lane"][-1] = 1    
-    # Alert logic
-    current_time = time.time()
-    for cls, buf in class_buffer.items():
-        if sum(buf) / buffer_len >= 0.7 and current_time - cooldown_class[cls] >= 5:
-            play_alert(cls)
-            cooldown_class[cls] = current_time
+        # Lane departure detection
+        frame, lane_departure, fast_lane = is_lane_departure_and_fast_lane(model_lane, frame, departure_threshold, middle_x, frame_height)
+        if lane_departure:
+            class_buffer["lane_departure"][-1] = 1
+        if fast_lane:
+            class_buffer["fast_lane"][-1] = 1    
+        # Alert logic
+        current_time = time.time()
+        for cls, buf in class_buffer.items():
+            if sum(buf) / buffer_len >= 0.4 and current_time - cooldown_class[cls] >= 5:
+                play_alert(cls)
+                cooldown_class[cls] = current_time
 
     # Display result
     try:
