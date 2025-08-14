@@ -17,5 +17,5 @@ video/
 *.t7
 lane_departure_warning
 test_images/
-models/
-runs/
+models/*
+runs/*
