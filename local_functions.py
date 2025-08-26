@@ -36,6 +36,7 @@ SOUND_PATH = os.getenv("SOUND_PATH")
 INNER_MODEL = os.getenv("INNER_MODEL")
 FRONT_MODEL = os.getenv("FRONT_MODEL")
 LANE_MODEL = os.getenv("LANE_MODEL")
+CAMERA_TYPE = os.getenv("CAMERA_TYPE")
 
 headers = {"Content-Type": "application/json", "Accept": "application/json"}
 

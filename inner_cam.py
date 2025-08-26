@@ -13,6 +13,7 @@ from local_functions import (
     MODEL_PATH,
     REMOTE_PATH,
     INNER_MODEL,
+    CAMERA_TYPE,
     getColours,
     save_upload_in_background,
     play_alert,
@@ -37,15 +38,18 @@ os_name = platform.system()
 is_windows = os_name == 'Windows'
 class_buffer = {cls: deque([0] * BUFFER_LEN, maxlen=BUFFER_LEN) for cls in VIOLATION_CLASSES}
 frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
-yolo = YOLO(MODEL_PATH + INNER_MODEL)
+inner_model = YOLO(MODEL_PATH + INNER_MODEL)
 
 camera = None
-
+threading.Thread(target=audio_record_loop, daemon=True).start()
 if is_windows:
     camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
-    threading.Thread(target=audio_record_loop, daemon=True).start()
 else:
-    camera = cv2.VideoCapture(CAMERA_INDEX_LINUX)
+    if CAMERA_TYPE == "usb":
+        camera = cv2.VideoCapture(CAMERA_INDEX_LINUX)
+    elif CAMERA_TYPE == "csi":
+        from nanocamera import Camera
+        camera = Camera(device_id=0, fps=30, width=1280, height=720, flip=0)
 
 cooldown_timers = {cls: 0 for cls in VIOLATION_CLASSES}
 detected_violations = set()
@@ -56,12 +60,17 @@ last_seen_driver = time.time()
 # ---------------- MAIN LOOP ------------------
 while True:
     # -------- Read frame --------
-    ret, frame = camera.read()
-    if not ret:
-        continue
+    if CAMERA_TYPE == "usb":
+        ret, frame = camera.read()
+        if not ret:
+            continue
+    elif CAMERA_TYPE == "csi":
+        frame = camera.read()
+        if frame is None:
+            continue
 
     frame_buffer.append(frame)
-    results = yolo.predict(frame)
+    results = inner_model.predict(frame)
 
     for cls in VIOLATION_CLASSES:
         class_buffer[cls].append(0)
@@ -125,10 +134,7 @@ while True:
             "video_path": f"{REMOTE_PATH}{fname}"
         })
 
-        if is_windows:
-            save_upload_in_background(frame_buffer, output_file, 30, json_body, audio_file)
-        else:
-            save_upload_in_background(frame_buffer, output_file, 30, json_body)
+        save_upload_in_background(frame_buffer, output_file, 30, json_body, audio_file)
 
         is_buffer_ready = False
         detected_classes.clear()

@@ -3,7 +3,7 @@ import time
 import platform
 from ultralytics import YOLO
 from local_functions import (
-    MODEL_PATH, FRONT_MODEL, LANE_MODEL, focal_length, distance_finder, get_width, getColours, play_alert, is_lane_departure_and_fast_lane
+    MODEL_PATH, FRONT_MODEL, LANE_MODEL, CAMERA_TYPE, focal_length, distance_finder, get_width, getColours, play_alert, is_lane_departure_and_fast_lane
 )
 from collections import deque
 
@@ -24,10 +24,10 @@ fonts = cv2.FONT_HERSHEY_COMPLEX
 
 # Load YOLO models
 model_lane = YOLO(MODEL_PATH + LANE_MODEL)
-yolo = YOLO(MODEL_PATH + FRONT_MODEL)
+front_model = YOLO(MODEL_PATH + FRONT_MODEL)
 
 # Class configuration
-object_class = list(yolo.names.values()) + ["lane_departure", "fast_lane"]
+object_class = list(front_model.names.values()) + ["lane_departure", "fast_lane"]
 buffer_len = 10
 class_buffer = {cls: deque([0] * buffer_len, maxlen=buffer_len) for cls in object_class}
 cooldown_class = {cls: 0 for cls in object_class}
@@ -42,8 +42,8 @@ ref_image_width = {
 }
 
 object_width_in_ref = {
-    "truck": get_width(ref_image_truck, yolo, "truck"),
-    "car": get_width(ref_image_car, yolo, "car"),
+    "truck": get_width(ref_image_truck, front_model, "truck"),
+    "car": get_width(ref_image_car, front_model, "car"),
 }
 
 normalized_width_ref = {
@@ -58,11 +58,18 @@ scale_factor = {
 
 if is_windows:
     cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
+    frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 else:
-    cap = cv2.VideoCapture(CAMERA_INDEX_LINUX)
-frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-
+    if CAMERA_TYPE == "usb":
+        cap = cv2.VideoCapture(CAMERA_INDEX_LINUX)
+        frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    elif CAMERA_TYPE == "csi":
+        from nanocamera import Camera
+        cap = Camera(device_id=0, fps=30, width=1280, height=720, flip=0)
+        frame_width = cap.width
+        frame_height = cap.height
 
 middle_x = frame_width // 2
 departure_threshold = frame_width // 15
@@ -70,9 +77,15 @@ departure_threshold = frame_width // 15
 frame_id = 0
 # Main loop
 while True:
-    ret, frame = cap.read()
-    if not ret:
-        continue
+    # -------- Read frame --------
+    if CAMERA_TYPE == "usb":
+        ret, frame = cap.read()
+        if not ret:
+            continue
+    elif CAMERA_TYPE == "csi":
+        frame = cap.read()
+        if frame is None:
+            continue
 
     frame_id += 1
 
@@ -80,7 +93,7 @@ while True:
     for cls in object_class:
         class_buffer[cls].append(0)
     if frame_id % 2 == 0:
-        results = yolo.predict(frame)
+        results = front_model.predict(frame)
         for result in results:
             class_names = result.names
             for box in result.boxes:
