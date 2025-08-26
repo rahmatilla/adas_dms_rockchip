@@ -3,7 +3,7 @@ import time
 import platform
 from ultralytics import YOLO
 from local_functions import (
-    MODEL_PATH, FRONT_MODEL, LANE_MODEL, CAMERA_TYPE, focal_length, distance_finder, get_width, getColours, play_alert, is_lane_departure_and_fast_lane
+    MODEL_PATH, FRONT_MODEL, LANE_MODEL, CAMERA_TYPE, REF_IMAGES, focal_length, distance_finder, get_width, getColours, play_alert, is_lane_departure_and_fast_lane
 )
 from collections import deque
 
@@ -33,8 +33,8 @@ class_buffer = {cls: deque([0] * buffer_len, maxlen=buffer_len) for cls in objec
 cooldown_class = {cls: 0 for cls in object_class}
 
 # Load reference images and compute scale factors for distance estimation
-ref_image_truck = cv2.imread("./ref_images/truck.jpg")
-ref_image_car = cv2.imread("./ref_images/car.jpg")
+ref_image_truck = cv2.imread(REF_IMAGES + "truck.jpg")
+ref_image_car = cv2.imread(REF_IMAGES + "car.jpg")
 
 ref_image_width = {
     "truck": ref_image_truck.shape[1],
