@@ -24,15 +24,17 @@ AUDIO_DURATION = 6
 audio_buffer = deque(maxlen=AUDIO_SR * AUDIO_DURATION)
 recording = True
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 REMOTE_HOST = os.getenv("REMOTE_HOST")
 REMOTE_PORT = int(os.getenv("REMOTE_PORT"))
 LOGIN = os.getenv("LOGIN")
 PASSWORD = os.getenv("PASSWORD")
 REMOTE_PATH = os.getenv("REMOTE_PATH")
-LOCAL_PATH = os.getenv("LOCAL_PATH")
-MODEL_PATH = os.getenv("MODEL_PATH")
+LOCAL_PATH = os.path.join(BASE_DIR, os.getenv("LOCAL_PATH")) 
+MODEL_PATH = os.path.join(BASE_DIR, os.getenv("MODEL_PATH")) 
 URL = os.getenv("URL")
-SOUND_PATH = os.getenv("SOUND_PATH")
+SOUND_PATH = os.path.join(BASE_DIR, os.getenv("SOUND_PATH")) 
 INNER_MODEL = os.getenv("INNER_MODEL")
 FRONT_MODEL = os.getenv("FRONT_MODEL")
 LANE_MODEL = os.getenv("LANE_MODEL")
