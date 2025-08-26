@@ -67,7 +67,7 @@ else:
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     elif CAMERA_TYPE == "csi":
         from nanocamera import Camera
-        cap = Camera(device_id=0, fps=30, width=1280, height=720, flip=0)
+        cap = Camera(device_id=1, fps=30, width=1280, height=720, flip=0)
         frame_width = cap.width
         frame_height = cap.height
 
