@@ -131,7 +131,7 @@ while True:
         current_time = time.time()
         for cls, buf in class_buffer.items():
             if sum(buf) / buffer_len >= 0.4 and current_time - cooldown_class[cls] >= 5:
-                play_alert(cls)
+                play_alert(cls, is_windows)
                 cooldown_class[cls] = current_time
 
     # Display result
