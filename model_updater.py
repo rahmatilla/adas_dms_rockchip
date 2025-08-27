@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # ================= CONFIG =================
-SERVER_URL = f"http://{os.getenv("DOMEN")}/check_models"
+SERVER_URL = f'http://{os.getenv("DOMEN")}/check_models'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 OLD_MODELS_DIR = os.path.join(BASE_DIR, "old_models")
