@@ -102,7 +102,7 @@ while True:
             if now - cooldown_timers[cls] >= 30:
                 detected_violations.add(cls)
                 cooldown_timers[cls] = now
-                play_alert(cls)
+                play_alert(cls, is_windows)
             class_buffer[cls].clear()
             class_buffer[cls].extend([0] * BUFFER_LEN)
 
@@ -113,7 +113,7 @@ while True:
         if now - cooldown_timers["camera_obstructed"] >= 30:
             detected_violations.add("camera_obstructed")
             cooldown_timers["camera_obstructed"] = now
-            play_alert("camera_obstructed")
+            play_alert("camera_obstructed", is_windows)
 
     if detected_violations:
         detected_classes.update(detected_violations)

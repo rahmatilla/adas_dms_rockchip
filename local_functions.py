@@ -163,9 +163,15 @@ def getColours(cls_num):
     color = [base[idx][i] + incs[idx][i] * (cls_num // len(base)) % 256 for i in range(3)]
     return tuple(color)
 
-def play_alert(violation):
+def play_alert(violation, is_windows):
     if violation in violation_sounds:
-        threading.Thread(target=lambda: pygame.mixer.Sound(violation_sounds[violation]).play(), daemon=True).start()
+        if is_windows:
+            threading.Thread(target=lambda: pygame.mixer.Sound(violation_sounds[violation]).play(), daemon=True).start()
+        else:
+            try:
+                subprocess.Popen(["aplay", violation_sounds[violation]])
+            except Exception as e:
+                print(f"aplay failed: {e}")
 
 def focal_length(measured_distance, real_width, width_in_rf_image):
     return (width_in_rf_image * measured_distance) / real_width
