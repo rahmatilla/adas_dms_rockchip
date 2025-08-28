@@ -17,7 +17,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 MODELS_DIR = os.path.join(BASE_DIR, "models")
 OLD_MODELS_DIR = os.path.join(BASE_DIR, "old_models")
 VERSION_FILE = os.path.join(MODELS_DIR, "version.json")
-CHECK_INTERVAL = 300  # 5 min
+CHECK_INTERVAL = 30  # 30 seconds
 TIMEOUT = 20  # sec for requests
 # ==========================================
 
