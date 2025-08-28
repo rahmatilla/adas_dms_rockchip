@@ -46,7 +46,7 @@ def get_local_versions():
 def save_versions(data):
     try:
         with open(VERSION_FILE, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump({"versions": data}, f, indent=4)
         logger.info("Updated version.json saved.")
     except Exception as e:
         logger.error(f"Failed to save version.json: {e}")
