@@ -53,21 +53,6 @@ def save_versions(data):
         logger.error(f"Failed to save version.json: {e}")
 
 
-# def download_file(url, dest):
-#     try:
-#         r = requests.get(url, stream=True, timeout=TIMEOUT)
-#         r.raise_for_status()
-#         with open(dest, "wb") as f:
-#             for chunk in r.iter_content(chunk_size=8192):
-#                 if chunk:
-#                     f.write(chunk)
-#         if os.path.getsize(dest) == 0:
-#             raise ValueError(f"Downloaded file {dest} is empty")
-#         logger.info(f"Downloaded {dest}")
-#     except Exception as e:
-#         logger.error(f"Error downloading {url}: {e}")
-#         raise
-
 def download_file(url: str, dest: str, timeout: int = TIMEOUT) -> str:
     """
     Скачивает файл по URL во временный файл и потом атомарно перемещает в dest.
@@ -109,16 +94,39 @@ def download_file(url: str, dest: str, timeout: int = TIMEOUT) -> str:
             os.remove(tmp_path)
         raise
 
-def backup_old_models():
+# def backup_old_models():
+#     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+#     backup_dir = os.path.join(OLD_MODELS_DIR, timestamp)
+#     os.makedirs(backup_dir, exist_ok=True)
+
+#     for fname in os.listdir(MODELS_DIR):
+#         fpath = os.path.join(MODELS_DIR, fname)
+#         if os.path.isfile(fpath) and fname.endswith(".pt"):
+#             shutil.move(fpath, backup_dir)
+#             logger.info(f"Moved old model {fname} → {backup_dir}")
+
+#     return backup_dir
+
+def backup_old_models(models_to_update: dict, MODELS_DIR: str, OLD_MODELS_DIR: str) -> str:
+
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dir = os.path.join(OLD_MODELS_DIR, timestamp)
     os.makedirs(backup_dir, exist_ok=True)
 
-    for fname in os.listdir(MODELS_DIR):
-        fpath = os.path.join(MODELS_DIR, fname)
-        if os.path.isfile(fpath) and fname.endswith(".pt"):
-            shutil.move(fpath, backup_dir)
-            logger.info(f"Moved old model {fname} → {backup_dir}")
+    for model_name, url in models_to_update.items():
+        new_fname = os.path.basename(url)
+
+        # ищем все файлы в MODELS_DIR, которые начинаются с префикса (front_, inner_, lane_)
+        prefix = model_name.split("_")[0]  # "front", "inner", "lane"
+        for fname in os.listdir(MODELS_DIR):
+            if fname.startswith(prefix) and fname.endswith(".pt"):
+                src = os.path.join(MODELS_DIR, fname)
+                dst = os.path.join(backup_dir, fname)
+                try:
+                    shutil.move(src, dst)
+                    logger.info(f"Moved old {model_name}: {src} → {dst}")
+                except Exception as e:
+                    logger.error(f"Failed to move {src}: {e}")
 
     return backup_dir
 
@@ -146,7 +154,7 @@ def main():
                 logger.info("New models found → updating...")
 
                 # Backup old models
-                backup_old_models()
+                backup_old_models(data["models"], MODELS_DIR, OLD_MODELS_DIR)
 
                 # Download new models
                 for model_name, url in data["models"].items():
