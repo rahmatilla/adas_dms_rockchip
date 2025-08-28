@@ -94,19 +94,6 @@ def download_file(url: str, dest: str, timeout: int = TIMEOUT) -> str:
             os.remove(tmp_path)
         raise
 
-# def backup_old_models():
-#     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-#     backup_dir = os.path.join(OLD_MODELS_DIR, timestamp)
-#     os.makedirs(backup_dir, exist_ok=True)
-
-#     for fname in os.listdir(MODELS_DIR):
-#         fpath = os.path.join(MODELS_DIR, fname)
-#         if os.path.isfile(fpath) and fname.endswith(".pt"):
-#             shutil.move(fpath, backup_dir)
-#             logger.info(f"Moved old model {fname} → {backup_dir}")
-
-#     return backup_dir
-
 def backup_old_models(models_to_update: dict, MODELS_DIR: str, OLD_MODELS_DIR: str) -> str:
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")

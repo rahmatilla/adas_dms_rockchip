@@ -135,12 +135,12 @@ while True:
                 cooldown_class[cls] = current_time
 
     # Display result
-    try:
-        cv2.imshow("ADAS View", frame)
-        if cv2.waitKey(1) == ord("q"):
-            break
-    except cv2.error as e:
-        print("cv2.imshow error (no GUI):", e)
+    # try:
+    #     cv2.imshow("ADAS View", frame)
+    #     if cv2.waitKey(1) == ord("q"):
+    #         break
+    # except cv2.error as e:
+    #     print("cv2.imshow error (no GUI):", e)
 
 cap.release()
 cv2.destroyAllWindows()

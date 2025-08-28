@@ -138,12 +138,12 @@ while True:
 
         is_buffer_ready = False
         detected_classes.clear()
-    try:
-        cv2.imshow('Driver Monitor', frame)
-        if cv2.waitKey(1) & 0xFF == ord('q'):
-            break
-    except cv2.error as e:
-        print("cv2.imshow error (no GUI):", e)
+    # try:
+    #     cv2.imshow('Driver Monitor', frame)
+    #     if cv2.waitKey(1) & 0xFF == ord('q'):
+    #         break
+    # except cv2.error as e:
+    #     print("cv2.imshow error (no GUI):", e)
 # -------- CLEANUP --------
 camera.release()
 cv2.destroyAllWindows()
