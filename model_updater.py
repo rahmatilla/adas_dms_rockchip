@@ -5,6 +5,7 @@ import shutil
 import subprocess
 import json
 import logging
+import tempfile
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -52,21 +53,61 @@ def save_versions(data):
         logger.error(f"Failed to save version.json: {e}")
 
 
-def download_file(url, dest):
-    try:
-        r = requests.get(url, stream=True, timeout=TIMEOUT)
-        r.raise_for_status()
-        with open(dest, "wb") as f:
-            for chunk in r.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-        if os.path.getsize(dest) == 0:
-            raise ValueError(f"Downloaded file {dest} is empty")
-        logger.info(f"Downloaded {dest}")
-    except Exception as e:
-        logger.error(f"Error downloading {url}: {e}")
-        raise
+# def download_file(url, dest):
+#     try:
+#         r = requests.get(url, stream=True, timeout=TIMEOUT)
+#         r.raise_for_status()
+#         with open(dest, "wb") as f:
+#             for chunk in r.iter_content(chunk_size=8192):
+#                 if chunk:
+#                     f.write(chunk)
+#         if os.path.getsize(dest) == 0:
+#             raise ValueError(f"Downloaded file {dest} is empty")
+#         logger.info(f"Downloaded {dest}")
+#     except Exception as e:
+#         logger.error(f"Error downloading {url}: {e}")
+#         raise
 
+def download_file(url: str, dest: str, timeout: int = TIMEOUT) -> str:
+    """
+    Скачивает файл по URL во временный файл и потом атомарно перемещает в dest.
+    Возвращает путь к скачанному файлу.
+    """
+    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".part", dir=os.path.dirname(dest))
+    os.close(tmp_fd)  # закроем, будем писать сами
+
+    try:
+        logger.info(f"Downloading from {url} → {dest}")
+
+        with requests.get(url, stream=True, timeout=timeout) as r:
+            r.raise_for_status()
+            total_size = int(r.headers.get("Content-Length", 0))
+            written = 0
+
+            with open(tmp_path, "wb") as f:
+                for chunk in r.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+                        written += len(chunk)
+
+        # Проверки после скачивания
+        if total_size and written != total_size:
+            raise ValueError(
+                f"Incomplete download: expected {total_size} bytes, got {written}"
+            )
+        if written == 0:
+            raise ValueError(f"Downloaded file {url} is empty")
+
+        # Атомарно заменяем
+        shutil.move(tmp_path, dest)
+        logger.info(f"Download complete: {dest} ({written} bytes)")
+        return dest
+
+    except Exception as e:
+        logger.error(f"Failed to download {url}: {e}")
+        if os.path.exists(tmp_path):
+            os.remove(tmp_path)
+        raise
 
 def backup_old_models():
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -109,7 +150,7 @@ def main():
 
                 # Download new models
                 for model_name, url in data["models"].items():
-                    dest = os.path.join(MODELS_DIR, model_name)
+                    dest = os.path.join(MODELS_DIR, os.path.basename(url))
                     download_file(url, dest)
 
                 # Update version.json
