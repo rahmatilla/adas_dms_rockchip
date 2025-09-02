@@ -142,7 +142,7 @@ while True:
     #     cv2.imshow('Driver Monitor', frame)
     #     if cv2.waitKey(1) & 0xFF == ord('q'):
     #         break
-    # except cv2.error as e:
+    # except cv2.error as e:q
     #     print("cv2.imshow error (no GUI):", e)
 # -------- CLEANUP --------
 camera.release()
