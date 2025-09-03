@@ -2,6 +2,7 @@
     "versions": {
         "front_model": "1.0.0",
         "inner_model": "1.0.0",
-        "lane_model": "1.0.0"
+        "lane_model": "1.0.0",
+        "app": "1.0.0"
     }
 }

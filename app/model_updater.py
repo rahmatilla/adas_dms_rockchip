@@ -6,6 +6,7 @@ import subprocess
 import json
 import logging
 import tempfile
+import zipfile
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -14,8 +15,9 @@ load_dotenv()
 # ================= CONFIG =================
 SERVER_URL = f'http://{os.getenv("DOMEN")}/check_models'
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-MODELS_DIR = os.path.join(BASE_DIR, "models")
-OLD_MODELS_DIR = os.path.join(BASE_DIR, "old_models")
+PARENT_DIR = os.path.dirname(BASE_DIR)
+MODELS_DIR = os.path.join(PARENT_DIR, "models")
+OLD_MODELS_DIR = os.path.join(PARENT_DIR, "old_models")
 VERSION_FILE = os.path.join(MODELS_DIR, "version.json")
 CHECK_INTERVAL = 30  # 30 seconds
 TIMEOUT = 20  # sec for requests
@@ -117,6 +119,40 @@ def backup_old_models(models_to_update: dict, MODELS_DIR: str, OLD_MODELS_DIR: s
 
     return backup_dir
 
+def backup_and_update_app(app_url: str, dest_dir: str = PARENT_DIR):
+    """
+    Скачивает ZIP с новой версией приложения, бэкапит текущую папку app/
+    и обновляет её.
+    """
+    tmp_zip = os.path.join(tempfile.gettempdir(), os.path.basename(app_url))
+    backup_root = os.path.join(dest_dir, "old_app")
+    os.makedirs(backup_root, exist_ok=True)
+    backup_dir = os.path.join(backup_root, datetime.now().strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(backup_dir, exist_ok=True)
+
+    # Скачиваем архив во временный файл
+    download_file(app_url, tmp_zip)
+
+    # Бэкапим текущую папку app/
+    app_path = os.path.join(dest_dir, "app")
+    if os.path.exists(app_path):
+        try:
+            shutil.copytree(app_path, os.path.join(backup_dir, "app"))
+            logger.info(f"Backed up app/ → {backup_dir}")
+        except Exception as e:
+            logger.error(f"Failed to backup app/: {e}")
+
+    # Распаковываем архив в dest_dir
+    try:
+        with zipfile.ZipFile(tmp_zip, "r") as zip_ref:
+            zip_ref.extractall(dest_dir)
+        logger.info(f"Application updated from {app_url}")
+    except Exception as e:
+        logger.error(f"Failed to extract app archive {tmp_zip}: {e}")
+        raise
+    finally:
+        if os.path.exists(tmp_zip):
+            os.remove(tmp_zip)
 
 def restart_app():
     try:
@@ -164,3 +200,5 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
