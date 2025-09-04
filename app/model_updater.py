@@ -174,15 +174,18 @@ def main():
             data = resp.json()
 
             if data.get("update_required"):
-                logger.info("New models found → updating...")
-
                 # Backup old models
                 backup_old_models(data["models"], MODELS_DIR, OLD_MODELS_DIR)
 
                 # Download new models
                 for model_name, url in data["models"].items():
-                    dest = os.path.join(MODELS_DIR, os.path.basename(url))
-                    download_file(url, dest)
+                    if model_name == "app":
+                        logger.info("Updating application package...")
+                        backup_and_update_app(data["models"]["app"])
+                    else:
+                        logger.info("New model found → updating...")
+                        dest = os.path.join(MODELS_DIR, os.path.basename(url))
+                        download_file(url, dest)
 
                 # Update version.json
                 save_versions(data["versions"])

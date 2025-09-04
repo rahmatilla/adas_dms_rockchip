@@ -1,8 +1,8 @@
 {
     "versions": {
-        "front_model": "1.0.0",
+        "front_model": "1.0.1",
         "inner_model": "1.0.0",
-        "lane_model": "1.0.0",
+        "lane_model": "1.0.1",
         "app": "1.0.0"
     }
 }
