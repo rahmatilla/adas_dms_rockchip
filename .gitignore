@@ -18,3 +18,4 @@ video/
 lane_departure_warning
 test_images/
 runs/*
+old_app/
