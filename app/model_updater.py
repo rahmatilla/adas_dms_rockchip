@@ -312,47 +312,61 @@ def download_file(url: str, dest: str, expected_md5: str = None, timeout: int = 
 
 def download_and_verify_models(models_info: dict, tmp_dir: str):
     """
-    Скачивает все новые модели во временную папку и проверяет MD5.
-    Если ошибка — кидает исключение и старые модели остаются на месте.
+    Скачивает только указанные модели во временную папку и проверяет MD5.
     """
     os.makedirs(tmp_dir, exist_ok=True)
+    downloaded = {}
+
     for model_name, info in models_info.items():
         if model_name == "app":
-            continue  # приложение обрабатываем отдельно
+            continue  # приложение отдельно
         url = info["url"]
         expected_md5 = info.get("md5")
         dest = os.path.join(tmp_dir, os.path.basename(url))
         download_file(url, dest, expected_md5)
-    logger.info("All models downloaded and verified in tmp dir")
+        downloaded[model_name] = dest
+
+    logger.info(f"Downloaded {len(downloaded)} models into tmp_dir={tmp_dir}")
+    return downloaded
 
 
-def apply_new_models(tmp_dir: str, models_dir: str, old_models_dir: str):
+def apply_new_models(downloaded: dict, models_dir: str, old_models_dir: str):
     """
-    Переносит старые модели в backup, а новые из tmp_dir кладёт в models_dir.
+    Бэкапит и заменяет только те модели, которые реально обновляются.
     """
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_dir = os.path.join(old_models_dir, timestamp)
     os.makedirs(backup_dir, exist_ok=True)
 
-    # Переносим старые модели
-    for fname in os.listdir(models_dir):
-        if fname.endswith(".pt"):
-            shutil.move(os.path.join(models_dir, fname), os.path.join(backup_dir, fname))
-            logger.info(f"Moved old model {fname} → {backup_dir}")
+    for model_name, tmp_path in downloaded.items():
+        prefix = model_name.split("_")[0]  # например "front"
+        # ищем в models_dir файлы только этого префикса
+        for fname in os.listdir(models_dir):
+            if fname.startswith(prefix) and fname.endswith(".pt"):
+                src = os.path.join(models_dir, fname)
+                dst = os.path.join(backup_dir, fname)
+                try:
+                    shutil.move(src, dst)
+                    logger.info(f"Backed up {model_name}: {src} → {dst}")
+                except Exception as e:
+                    logger.error(f"Failed to backup {src}: {e}")
 
-    # Устанавливаем новые
-    for fname in os.listdir(tmp_dir):
-        shutil.move(os.path.join(tmp_dir, fname), os.path.join(models_dir, fname))
-        logger.info(f"Installed new model {fname}")
+        # ставим новую модель
+        new_fname = os.path.basename(tmp_path)
+        shutil.move(tmp_path, os.path.join(models_dir, new_fname))
+        logger.info(f"Installed new {model_name}: {new_fname}")
 
-    shutil.rmtree(tmp_dir)
-    logger.info("Applied new models successfully")
+    # удалим tmp_dir, если пустой
+    try:
+        shutil.rmtree(os.path.dirname(list(downloaded.values())[0]))
+    except Exception:
+        pass
+    logger.info("Applied updated models successfully")
 
 
 def backup_and_update_app(app_url: str, expected_md5: str, dest_dir: str = PARENT_DIR):
     """
-    Скачивает ZIP с новой версией приложения, проверяет MD5,
-    бэкапит текущую папку app/ и обновляет её.
+    Бэкапит только папку app/, скачивает новый архив, проверяет MD5 и заменяет.
     """
     tmp_zip = os.path.join(tempfile.gettempdir(), os.path.basename(app_url))
     backup_root = os.path.join(dest_dir, "old_app")
@@ -363,7 +377,7 @@ def backup_and_update_app(app_url: str, expected_md5: str, dest_dir: str = PAREN
     # Скачиваем с проверкой MD5
     download_file(app_url, tmp_zip, expected_md5)
 
-    # Бэкапим текущую папку app/
+    # Бэкапим только app/
     app_path = os.path.join(dest_dir, "app")
     if os.path.exists(app_path):
         try:
@@ -405,28 +419,30 @@ def main():
             data = resp.json()
 
             if data.get("update_required"):
+                logger.info("New updates available...")
+
                 models_info = data["models"]
 
-                # 1. сначала качаем и проверяем во временную папку
-                tmp_dir = os.path.join(tempfile.gettempdir(), "new_models")
-                if os.path.exists(tmp_dir):
-                    shutil.rmtree(tmp_dir)
-                download_and_verify_models(models_info, tmp_dir)
+                # ---- обновляем модели ----
+                tmp_dir = tempfile.mkdtemp(prefix="new_models_")
+                downloaded = download_and_verify_models(models_info, tmp_dir)
 
-                # 2. если всё ок → обновляем приложение/модели
-                for model_name, info in models_info.items():
-                    if model_name == "app":
-                        logger.info("Updating application package...")
-                        backup_and_update_app(info["url"], info.get("md5"))
-                apply_new_models(tmp_dir, MODELS_DIR, OLD_MODELS_DIR)
+                if downloaded:
+                    apply_new_models(downloaded, MODELS_DIR, OLD_MODELS_DIR)
 
-                # 3. обновляем version.json
+                # ---- обновляем приложение ----
+                if "app" in models_info:
+                    app_info = models_info["app"]
+                    logger.info("Updating application package...")
+                    backup_and_update_app(app_info["url"], app_info.get("md5"))
+
+                # ---- сохраняем версии ----
                 save_versions(data["versions"])
 
-                # 4. рестартуем сервисы
+                # ---- перезапускаем сервисы ----
                 restart_app()
             else:
-                logger.info("Models are up-to-date.")
+                logger.info("Models and app are up-to-date.")
 
         except Exception as e:
             logger.error(f"Update check failed: {e}")
