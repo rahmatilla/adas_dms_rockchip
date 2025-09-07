@@ -196,8 +196,7 @@ def restart_app():
     try:
         subprocess.run(["sudo", "systemctl", "restart", "inner_cam.service"], check=True)
         subprocess.run(["sudo", "systemctl", "restart", "front_cam.service"], check=True)
-        subprocess.run(["sudo", "systemctl", "restart", "model_updater.service"], check=True)
-        logger.info("Successfully restarted inner_cam, front_cam and model_updater services.")
+        logger.info("Successfully restarted inner_cam and front_cam services.")
     except subprocess.CalledProcessError as e:
         logger.error(f"Failed to restart services: {e}")
 
