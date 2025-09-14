@@ -41,7 +41,7 @@ def record_camera(name, video_src, audio_src, is_windows=False, is_jetson=False)
         ]
 
     elif is_jetson:
-        # Jetson → GStreamer (nvarguscamerasrc для CSI или v4l2src для USB)
+        # Jetson → GStreamer
         if "video1" in video_src:
             sensor_id = 1
         else:
@@ -51,7 +51,7 @@ def record_camera(name, video_src, audio_src, is_windows=False, is_jetson=False)
             "nvarguscamerasrc", f"sensor-id={sensor_id}", "!", 
             "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1", "!",
             "nvvidconv", "!", "nvv4l2h264enc", "!", "mp4mux", "!",
-            f"filesink location={out_file} -e"
+            f"filesink", f"location={out_file}", "-e"
         ]
 
     else:
@@ -66,7 +66,11 @@ def record_camera(name, video_src, audio_src, is_windows=False, is_jetson=False)
         ]
 
     print(f"[INFO] Запись {name} в {out_file}")
-    subprocess.run(" ".join(cmd), shell=True)
+    try:
+        subprocess.run(cmd, check=True)
+    except subprocess.CalledProcessError as e:
+        print(f"[ERROR] Ошибка записи {name}: {e}")
+
 
 
 def main():
