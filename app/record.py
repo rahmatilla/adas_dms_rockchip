@@ -1,87 +1,103 @@
-import subprocess
-import time
-import threading
-import requests
-from datetime import datetime, timedelta
 import os
+import platform
+import subprocess
+import threading
+from datetime import datetime
 
-SERVER_URL = "http://your-server/upload_video"
-FRONT_CAM_SRC = "/dev/video0"   # фронтальная камера
-INNER_CAM_SRC = "/dev/video1"   # внутренняя камера
-FRONT_AUDIO_SRC = "hw:1,0"      # микрофон для фронтальной камеры
-INNER_AUDIO_SRC = "hw:2,0"      # микрофон для внутренней камеры
+RECORD_DIR = "./recordings"
+os.makedirs(RECORD_DIR, exist_ok=True)
+
 DURATION = 60  # секунд
-OUTPUT_DIR = "./recordings"
-RETENTION_HOURS = 24  # хранить сутки
-os.makedirs(OUTPUT_DIR, exist_ok=True)
+
+# Укажем источники камер и микрофонов
+FRONT_CAM_SRC = "/dev/video0"   # Jetson/Линукс
+INNER_CAM_SRC = "/dev/video1"
+FRONT_AUDIO_SRC = "hw:1,0"      # Jetson ALSA
+INNER_AUDIO_SRC = "hw:1,0"
+
+# Windows примеры
+WIN_FRONT_CAM = "FHD Camera"
+WIN_INNER_CAM = "HD User Facing"
+WIN_FRONT_MIC = "Microphone (FHD Camera AC)"
+WIN_INNER_MIC = "Microphone Array (Realtek(R) Audio)"
 
 
-def cleanup_old_files():
-    """Удаляет файлы старше суток"""
-    now = datetime.now()
-    for fname in os.listdir(OUTPUT_DIR):
-        fpath = os.path.join(OUTPUT_DIR, fname)
-        if os.path.isfile(fpath):
-            mtime = datetime.fromtimestamp(os.path.getmtime(fpath))
-            if now - mtime > timedelta(hours=RETENTION_HOURS):
-                try:
-                    os.remove(fpath)
-                    print(f"🗑 Удалён старый файл: {fpath}")
-                except Exception as e:
-                    print(f"⚠️ Ошибка удаления {fpath}: {e}")
+def get_timestamp():
+    return datetime.now().strftime("%Y%m%d_%H%M%S")
 
 
-def record_camera(cam_src, audio_src, prefix):
-    while True:
-        filename = f"{prefix}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.mp4"
-        filepath = os.path.join(OUTPUT_DIR, filename)
+def record_camera(name, video_src, audio_src, is_windows=False, is_jetson=False):
+    ts = get_timestamp()
+    out_file = os.path.join(RECORD_DIR, f"{name}_{ts}.mp4")
 
-        # ffmpeg: видео H.264 + звук AAC
+    if is_windows:
+        # Windows → DirectShow
         cmd = [
-            "ffmpeg",
-            "-y",
-            "-t", str(DURATION),
-            "-f", "v4l2", "-i", cam_src,        # видео (V4L2)
-            "-f", "alsa", "-i", audio_src,      # звук (ALSA)
+            "ffmpeg", "-y", "-t", str(DURATION),
+            "-f", "dshow", "-i", f"video={video_src}:audio={audio_src}",
             "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
             "-c:a", "aac", "-b:a", "128k",
-            "-pix_fmt", "yuv420p",
-            filepath
+            "-pix_fmt", "yuv420p", out_file
         ]
 
-        try:
-            subprocess.run(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=True)
-            print(f"✅ Записано видео+звук: {filepath}")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Ошибка записи {prefix}: {e}")
-            time.sleep(5)
-            continue
+    elif is_jetson:
+        # Jetson → GStreamer (nvarguscamerasrc для CSI или v4l2src для USB)
+        if "video1" in video_src:
+            sensor_id = 1
+        else:
+            sensor_id = 0
+        cmd = [
+            "gst-launch-1.0",
+            "nvarguscamerasrc", f"sensor-id={sensor_id}", "!", 
+            "video/x-raw(memory:NVMM),width=1280,height=720,framerate=30/1", "!",
+            "nvvidconv", "!", "nvv4l2h264enc", "!", "mp4mux", "!",
+            f"filesink location={out_file} -e"
+        ]
 
-        # Отправляем на сервер
-        try:
-            with open(filepath, "rb") as f:
-                files = {"file": (filename, f, "video/mp4")}
-                r = requests.post(SERVER_URL, files=files, timeout=120)
-                if r.status_code == 200:
-                    print(f"📤 Успешно отправлено: {filepath}")
-                else:
-                    print(f"⚠️ Ошибка при отправке {filepath}: {r.status_code}")
-        except Exception as e:
-            print(f"❌ Ошибка загрузки {filepath}: {e}")
+    else:
+        # Linux PC → ffmpeg (v4l2 + alsa)
+        cmd = [
+            "ffmpeg", "-y", "-t", str(DURATION),
+            "-f", "v4l2", "-framerate", "30", "-video_size", "1280x720", "-i", video_src,
+            "-f", "alsa", "-i", audio_src,
+            "-c:v", "libx264", "-preset", "veryfast", "-crf", "23",
+            "-c:a", "aac", "-b:a", "128k",
+            "-pix_fmt", "yuv420p", out_file
+        ]
 
-        # Удаляем старые записи
-        cleanup_old_files()
+    print(f"[INFO] Запись {name} в {out_file}")
+    subprocess.run(" ".join(cmd), shell=True)
 
 
 def main():
-    t1 = threading.Thread(target=record_camera, args=(FRONT_CAM_SRC, FRONT_AUDIO_SRC, "front"))
-    t2 = threading.Thread(target=record_camera, args=(INNER_CAM_SRC, INNER_AUDIO_SRC, "inner"))
+    system = platform.system().lower()
+    is_windows = system == "windows"
+    is_jetson = os.path.exists("/usr/sbin/nvargus-daemon")  # простая проверка Jetson
 
-    t1.start()
-    t2.start()
+    if is_windows:
+        cams = [
+            ("front", WIN_FRONT_CAM, WIN_FRONT_MIC),
+            ("inner", WIN_INNER_CAM, WIN_INNER_MIC)
+        ]
+    elif is_jetson:
+        cams = [
+            ("front", FRONT_CAM_SRC, FRONT_AUDIO_SRC),
+            ("inner", INNER_CAM_SRC, INNER_AUDIO_SRC)
+        ]
+    else:
+        cams = [
+            ("front", FRONT_CAM_SRC, FRONT_AUDIO_SRC),
+            ("inner", INNER_CAM_SRC, INNER_AUDIO_SRC)
+        ]
 
-    t1.join()
-    t2.join()
+    threads = []
+    for name, vsrc, asrc in cams:
+        t = threading.Thread(target=record_camera, args=(name, vsrc, asrc, is_windows, is_jetson))
+        t.start()
+        threads.append(t)
+
+    for t in threads:
+        t.join()
 
 
 if __name__ == "__main__":
