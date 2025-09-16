@@ -1,4 +1,5 @@
 import cv2
+import json
 import time
 import threading
 import platform
@@ -7,20 +8,23 @@ from datetime import datetime
 from ultralytics import YOLO
 
 from local_functions import (
-    append_to_buffer,
-    trigger_violation,
-    audio_record_loop,
-    getColours,
-    play_alert,
+    check_buffer,
+    LOCAL_PATH,
     MODEL_PATH,
+    REMOTE_PATH,
     INNER_MODEL,
     CAMERA_TYPE,
+    getColours,
+    save_upload_in_background,
+    play_alert,
+    audio_record_loop
 )
 
 # ---------------- CONFIG ------------------
 CAMERA_INDEX = 0
 CAMERA_INDEX_LINUX = 49
 BUFFER_LEN = 20
+VIDEO_FRAME_LEN = 180  # 6 sec at 30 FPS
 VIOLATION_CLASSES = {
     'drinking', 'eating', 'eyes_closed', 'mobile_usage', 'no_seatbelt',
     'smoking', 'yawn', "inattentive_driving"
@@ -32,14 +36,12 @@ OBSTRUCTION_CLASSES = {
 # ---------------- INIT ------------------
 os_name = platform.system()
 is_windows = os_name == 'Windows'
-
-# har bir klass uchun sliding window
 class_buffer = {cls: deque([0] * BUFFER_LEN, maxlen=BUFFER_LEN) for cls in VIOLATION_CLASSES}
-
+frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
 inner_model = YOLO(MODEL_PATH + INNER_MODEL)
 
-# kamera ochish
 camera = None
+threading.Thread(target=audio_record_loop, daemon=True).start()
 if is_windows:
     camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
 else:
@@ -49,14 +51,11 @@ else:
         from nanocamera import Camera
         camera = Camera(device_id=0, fps=30, width=1280, height=720, flip=0)
 
-# audio yozishni fon thread sifatida ishga tushirish
-threading.Thread(target=audio_record_loop, daemon=True).start()
-
 cooldown_timers = {cls: 0 for cls in VIOLATION_CLASSES}
 detected_violations = set()
+detected_classes = set()
+is_buffer_ready = False
 last_seen_driver = time.time()
-
-print("[INFO] Inner camera started...")
 
 # ---------------- MAIN LOOP ------------------
 while True:
@@ -70,39 +69,34 @@ while True:
         if frame is None:
             continue
 
-    # global bufferga yozish
-    append_to_buffer("inner", frame)
+    frame_buffer.append(frame)
+    results = inner_model.predict(frame)
 
-    # model predict
-    results = inner_model.predict(frame, verbose=False)
-
-    # har klass uchun flag reset
     for cls in VIOLATION_CLASSES:
         class_buffer[cls].append(0)
-    result = results[0]
-    class_names = result.names
-    for box in result.boxes:
-        x1, y1, x2, y2 = map(int, box.xyxy[0])
-        cls_id = int(box.cls[0])
-        cls_name = class_names[cls_id]
-        conf = float(box.conf[0])
 
-        # turli klasslar uchun threshold
-        threshold = 0.7 if cls_name == "eyes_closed" else 0.4
-        if conf > threshold:
-            color = getColours(cls_id)
-            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-            cv2.putText(frame, f'{cls_name} {conf:.2f}', (x1, y1),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+    for result in results:
+        class_names = result.names
+        for box in result.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            cls_id = int(box.cls[0])
+            cls_name = class_names[cls_id]
+            conf = float(box.conf[0])
 
-            if cls_name in VIOLATION_CLASSES:
-                class_buffer[cls_name][-1] = 1
+            threshold = 0.7 if cls_name == "eyes_closed" else 0.4
+            if conf > threshold:
+                color = getColours(cls_id)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+                cv2.putText(frame, f'{cls_name} {conf:.2f}', (x1, y1),
+                            cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
 
-            if cls_name in OBSTRUCTION_CLASSES:
-                last_seen_driver = time.time()
+                if cls_name in VIOLATION_CLASSES:
+                    class_buffer[cls_name][-1] = 1
+
+                if cls_name in OBSTRUCTION_CLASSES:
+                    last_seen_driver = time.time()
 
     now = time.time()
-    # violation kuzatish
     for cls, buf in class_buffer.items():
         if sum(buf) / BUFFER_LEN >= 0.8:
             if now - cooldown_timers[cls] >= 30:
@@ -112,7 +106,6 @@ while True:
             class_buffer[cls].clear()
             class_buffer[cls].extend([0] * BUFFER_LEN)
 
-    # agar haydovchi 10s ko‘rinmasa
     if now - last_seen_driver > 10:
         if "camera_obstructed" not in class_buffer:
             class_buffer["camera_obstructed"] = deque([1] * BUFFER_LEN, maxlen=BUFFER_LEN)
@@ -122,17 +115,35 @@ while True:
             cooldown_timers["camera_obstructed"] = now
             play_alert("camera_obstructed")
 
-    # violation aniqlansa → trigger
     if detected_violations:
-        print(f"[DETECTED] Violations: {detected_violations}")
-        trigger_violation(detected_violations.copy(), driver_name="driver01")
+        detected_classes.update(detected_violations)
         detected_violations.clear()
+        if not is_buffer_ready:
+            frame_buffer = check_buffer(frame_buffer, VIDEO_FRAME_LEN // 2)
+            is_buffer_ready = True
 
-    # agar GUI bo‘lsa
-    # cv2.imshow("Driver Monitor", frame)
-    # if cv2.waitKey(1) & 0xFF == ord('q'):
-    #     break
+    if is_buffer_ready and len(frame_buffer) >= VIDEO_FRAME_LEN - 1:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        fname = f"{timestamp}-{'-'.join(detected_classes)}.mp4"
+        output_file = f"{LOCAL_PATH}{fname}"
+        audio_file = f"{LOCAL_PATH}{timestamp}-{'-'.join(detected_classes)}.wav"
+        json_body = json.dumps({
+            "driver_name": "driver01",
+            "violation_type": ' '.join(detected_classes),
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "video_path": f"{REMOTE_PATH}{fname}"
+        })
 
+        save_upload_in_background(frame_buffer, output_file, 30, json_body, audio_file)
+
+        is_buffer_ready = False
+        detected_classes.clear()
+    # try:
+    #     cv2.imshow('Driver Monitor', frame)
+    #     if cv2.waitKey(1) & 0xFF == ord('q'):
+    #         break
+    # except cv2.error as e:q
+    #     print("cv2.imshow error (no GUI):", e)
 # -------- CLEANUP --------
 camera.release()
 cv2.destroyAllWindows()
