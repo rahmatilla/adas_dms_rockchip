@@ -15,7 +15,6 @@ from dotenv import load_dotenv
 import sounddevice as sd
 import soundfile as sf
 import pygame
-from multiprocessing import shared_memory
 
 # =====================
 # CONFIG & CONSTANTS
@@ -30,28 +29,6 @@ FRAME_RATE = 30         # FPS ni haqiqiy kameraga qarab moslang
 CLIP_SECONDS = 6
 CLIP_FRAMES = FRAME_RATE * CLIP_SECONDS
 POST_TRIGGER_WAIT_SEC = 3
-
-FRAME_SHAPE = (720, 1280, 3)
-FRAME_DTYPE = np.uint8
-AUDIO_DTYPE = np.float32
-
-NUM_FRAMES = FRAME_RATE * BUFFER_SECONDS
-NUM_SAMPLES = AUDIO_SR * BUFFER_SECONDS
-
-# ================= ATTACH TO SHARED MEMORY =================
-shm_inner = shared_memory.SharedMemory(name="shm_inner")
-shm_front = shared_memory.SharedMemory(name="shm_front")
-shm_audio = shared_memory.SharedMemory(name="shm_audio")
-
-# Numpy view yaratamiz
-inner_array = np.ndarray((NUM_FRAMES,) + FRAME_SHAPE, dtype=FRAME_DTYPE, buffer=shm_inner.buf)
-front_array = np.ndarray((NUM_FRAMES,) + FRAME_SHAPE, dtype=FRAME_DTYPE, buffer=shm_front.buf)
-audio_array = np.ndarray((NUM_SAMPLES,), dtype=AUDIO_DTYPE, buffer=shm_audio.buf)
-
-# Ring-buffer uchun indekslar
-inner_idx = 0
-front_idx = 0
-audio_idx = 0
 
 # video bufferlar
 inner_buffer = deque(maxlen=FRAME_RATE * BUFFER_SECONDS)
@@ -86,28 +63,25 @@ headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
 pygame.mixer.init()
 
-# ================= AUDIO LOOP =================
+# =====================
+# AUDIO FUNCTIONS
+# =====================
 def audio_record_loop():
-    global audio_idx
+    """Doimiy audio yozish sikli (background-da ishga tushadi)."""
     def callback(indata, frames, time_info, status):
-        global audio_idx
-        n = len(indata[:, 0])
-        pos = (audio_idx + np.arange(n)) % NUM_SAMPLES
-        audio_array[pos] = indata[:, 0]
-        audio_idx = (audio_idx + n) % NUM_SAMPLES
-    with sd.InputStream(samplerate=AUDIO_SR, channels=CHANNELS, callback=callback, dtype="float32"):
-        while True:
+        with audio_lock:
+            audio_buffer.extend(indata[:, 0])  # faqat mono kanal
+    with sd.InputStream(samplerate=AUDIO_SR, channels=CHANNELS, callback=callback):
+        while recording:
             sd.sleep(100)
 
 def save_last_audio_clip(filename: str, duration_sec: int = CLIP_SECONDS):
+    """Oxirgi duration_sec soniyalik audioni faylga yozadi."""
     n_samples = duration_sec * AUDIO_SR
-    pos = (audio_idx - n_samples) % NUM_SAMPLES
-    if pos + n_samples <= NUM_SAMPLES:
-        samples = audio_array[pos:pos+n_samples]
-    else:
-        first = NUM_SAMPLES - pos
-        samples = np.concatenate([audio_array[pos:], audio_array[:n_samples-first]])
-    sf.write(filename, samples, AUDIO_SR)
+    with audio_lock:
+        samples = list(audio_buffer)[-n_samples:]
+    if samples:
+        sf.write(filename, np.array(samples), AUDIO_SR)
 
 # =====================
 # VIDEO FUNCTIONS
@@ -151,28 +125,27 @@ def upload_to_server(file_path, json_body=None):
 # BUFFER HELPERS
 # =====================
 def append_to_buffer(which: str, frame):
-    global inner_idx, front_idx
+    """Frame ni mos bufferga qo‘shish."""
     if which == "inner":
-        inner_array[inner_idx % NUM_FRAMES] = frame
-        inner_idx += 1
+        with inner_lock:
+            inner_buffer.append(frame.copy())
     elif which == "front":
-        front_array[front_idx % NUM_FRAMES] = frame
-        front_idx += 1
-
-def extract_last_n_frames_from_buffer(which: str, n_frames: int):
-    if which == "inner":
-        idx = inner_idx
-        arr = inner_array
-    elif which == "front":
-        idx = front_idx
-        arr = front_array
+        with front_lock:
+            front_buffer.append(frame.copy())
     else:
         raise ValueError("which must be 'inner' or 'front'")
 
-    out = []
-    for i in range(n_frames, 0, -1):
-        out.append(arr[(idx - i) % NUM_FRAMES].copy())
-    return out
+def extract_last_n_frames_from_buffer(which: str, n_frames: int):
+    """Oxirgi n_frames framelarni chiqarib olish."""
+    if which == "inner":
+        with inner_lock:
+            lst = list(inner_buffer)[-n_frames:]
+    elif which == "front":
+        with front_lock:
+            lst = list(front_buffer)[-n_frames:]
+    else:
+        raise ValueError("which must be 'inner' or 'front'")
+    return [f.copy() for f in lst]
 
 # =====================
 # VIOLATION HANDLER
