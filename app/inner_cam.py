@@ -14,6 +14,7 @@ from local_functions import (
     REMOTE_PATH,
     INNER_MODEL,
     CAMERA_TYPE,
+    AUDIO_DEVICE_INNER,
     getColours,
     save_upload_in_background,
     play_alert,
@@ -41,7 +42,7 @@ frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
 inner_model = YOLO(MODEL_PATH + INNER_MODEL)
 
 camera = None
-threading.Thread(target=audio_record_loop, daemon=True).start()
+threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_INNER,),daemon=True).start()
 if is_windows:
     camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
     camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))

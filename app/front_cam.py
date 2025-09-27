@@ -11,7 +11,8 @@ from local_functions import (
     REMOTE_PATH, 
     FRONT_MODEL, 
     LANE_MODEL, 
-    CAMERA_TYPE, 
+    CAMERA_TYPE,
+    AUDIO_DEVICE_FRONT,
     REF_IMAGES, 
     get_width, 
     getColours,
@@ -112,7 +113,7 @@ is_buffer_ready = False
 
 # ---------------- START AUDIO ------------------
 import threading
-threading.Thread(target=audio_record_loop, daemon=True).start()
+threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_FRONT,),daemon=True).start()
 
 # Main loop
 while True:
