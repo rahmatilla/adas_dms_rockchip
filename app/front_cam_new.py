@@ -1,9 +1,9 @@
 import cv2
 import time
-import json
 import platform
 from ultralytics import YOLO
 from datetime import datetime
+import json
 from local_functions import (
     check_buffer,
     MODEL_PATH, 
@@ -11,7 +11,8 @@ from local_functions import (
     REMOTE_PATH, 
     FRONT_MODEL, 
     LANE_MODEL, 
-    CAMERA_TYPE, 
+    CAMERA_TYPE,
+    AUDIO_DEVICE_FRONT,
     REF_IMAGES, 
     get_width, 
     getColours,
@@ -24,12 +25,11 @@ from collections import deque
 
 # Detect platform and set camera source
 CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 51
+CAMERA_INDEX_LINUX = 6
 os_name = platform.system()
 is_windows = os_name == 'Windows'
-FPS = 30
-VIDEO_FRAME_LEN = 6*FPS
 COOLDOWN_THRESHOLD = 30
+VIDEO_FRAME_LEN = 180
 
 VIOLATION_CLASSES = {
     'lane_departure', 'fast_lane', 'follow_distance', 'shoulder_stop', 'red_light', 'stop'
@@ -52,8 +52,8 @@ front_model = YOLO(MODEL_PATH + FRONT_MODEL)
 object_class = list(front_model.names.values()) + ["lane_departure", "fast_lane"]
 buffer_len = 10
 class_buffer = {cls: deque([0] * buffer_len, maxlen=buffer_len) for cls in object_class}
-cooldown_class = {cls: 0 for cls in object_class}
 frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
+cooldown_class = {cls: 0 for cls in object_class}
 
 # Load reference images and compute scale factors for distance estimation
 ref_image_truck = cv2.imread(REF_IMAGES + "truck.jpg")
@@ -81,11 +81,20 @@ scale_factor = {
 
 if is_windows:
     cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
+    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+    cap.set(cv2.CAP_PROP_FPS,30)
+    cap.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
+    cap.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 else:
     if CAMERA_TYPE == "usb":
-        cap = cv2.VideoCapture(CAMERA_INDEX_LINUX)
+        cap = cv2.VideoCapture(CAMERA_INDEX_LINUX, cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FPS,30)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
+        print("FPS:", cap.get(cv2.CAP_PROP_FPS))
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     elif CAMERA_TYPE == "csi":
@@ -104,9 +113,7 @@ is_buffer_ready = False
 
 # ---------------- START AUDIO ------------------
 import threading
-threading.Thread(target=audio_record_loop, daemon=True).start()
-
-print("[INFO] Front camera started...")
+threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_FRONT,),daemon=True).start()
 
 # Main loop
 while True:
@@ -127,34 +134,33 @@ while True:
     for cls in object_class:
         class_buffer[cls].append(0)
     if frame_id % 2 == 0:
-        results = front_model.predict(frame, verbose=False)
-        result = results[0]
-        class_names = result.names
-        for box in result.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            cls_id = int(box.cls[0])
-            class_name = class_names[cls_id]
+        results = front_model.predict(frame, stream=True, verbose=False)
+        for result in results:
+            class_names = result.names
+            for box in result.boxes:
+                x1, y1, x2, y2 = map(int, box.xyxy[0])
+                cls_id = int(box.cls[0])
+                class_name = class_names[cls_id]
 
-            conf = float(box.conf[0])
-            if conf < 0.4:
-                continue
+                conf = float(box.conf[0])
+                if conf < 0.4:
+                    continue
 
-            if class_name in VIOLATION_CLASSES:
                 class_buffer[class_name][-1] = 1
 
-            # Estimate distance if object is centered
-            if x1 < middle_x < x2 and class_name in ["car", "truck"]:
-                obj_width_in_frame = x2 - x1
-                normalized_width = obj_width_in_frame / frame_width
-                if normalized_width > 0:
-                    distance = scale_factor[class_name] / normalized_width
-                    cv2.putText(frame, f"Distance = {distance:.2f}m", (50, 50), fonts, 0.6, RED, 2)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), (GREEN), 2)
-                    cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (GREEN), 2)
-            else:
-                colour = getColours(cls_id)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
-                cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
+                # Estimate distance if object is centered
+                if x1 < middle_x < x2 and class_name in ["car", "truck"]:
+                    obj_width_in_frame = x2 - x1
+                    normalized_width = obj_width_in_frame / frame_width
+                    if normalized_width > 0:
+                        distance = scale_factor[class_name] / normalized_width
+                        cv2.putText(frame, f"Distance = {distance:.2f}m", (50, 50), fonts, 0.6, RED, 2)
+                        cv2.rectangle(frame, (x1, y1), (x2, y2), (GREEN), 2)
+                        cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (GREEN), 2)
+                else:
+                    colour = getColours(cls_id)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
+                    cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
 
         # Lane departure detection
         frame, lane_departure, fast_lane = is_lane_departure_and_fast_lane(model_lane, frame, departure_threshold, middle_x, frame_height)
@@ -192,13 +198,15 @@ while True:
                 "video_path": f"{REMOTE_PATH}{fname}"
             })
 
-            save_upload_in_background(frame_buffer, output_file, FPS, json_body, audio_file)
+            save_upload_in_background(frame_buffer, output_file, 30, json_body, audio_file)
 
             is_buffer_ready = False
             detected_classes.clear()
 
     # Display result
     try:
+        cv2.namedWindow('ADAS View', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('ADAS View', 960,540)
         cv2.imshow("ADAS View", frame)
         if cv2.waitKey(1) == ord("q"):
             break

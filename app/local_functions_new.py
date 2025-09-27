@@ -41,6 +41,8 @@ INNER_MODEL = os.getenv("INNER_MODEL")
 FRONT_MODEL = os.getenv("FRONT_MODEL")
 LANE_MODEL = os.getenv("LANE_MODEL")
 CAMERA_TYPE = os.getenv("CAMERA_TYPE")
+AUDIO_DEVICE_INNER = os.getenv("AUDIO_DEVICE_INNER", "default")
+AUDIO_DEVICE_FRONT = os.getenv("AUDIO_DEVICE_FRONT", "default")
 
 headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
@@ -103,10 +105,23 @@ violation_sounds = {
     "fast_lane": f"{SOUND_PATH}fast_lane.mp3",
 }
 
-def audio_record_loop():
+def audio_record_loop(AUDIO_DEVICE):
     def callback(indata, frames, time_info, status):
         audio_buffer.extend(indata[:, 0])
-    with sd.InputStream(samplerate=AUDIO_SR, channels=CHANNELS, callback=callback):
+
+    try:
+        device = int(AUDIO_DEVICE)
+    except ValueError:
+        device = AUDIO_DEVICE
+
+    print(f"[INFO] Using audio device: {device}")
+
+    with sd.InputStream(
+        samplerate=AUDIO_SR,
+        channels=CHANNELS,
+        device=device,
+        callback=callback
+    ):
         while recording:
             sd.sleep(100)
 
@@ -139,7 +154,7 @@ def save_video(buffer, output_file, fps, audio_file=None):
     ]
     if audio_file:
         command += ["-i", audio_file, "-c:a", "aac", "-b:a", "96k"]
-    command += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "28", "-preset", "ultrafast", "-shortest", output_file]
+    command += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "28", "-preset", "ultrafast", output_file]
 
     process = subprocess.Popen(command, stdin=subprocess.PIPE)
     for frame in frames:
@@ -205,7 +220,7 @@ def is_lane_departure_and_fast_lane(model, frame, departure_threshold, frame_cen
     detected_lines = set()
     lanedeparture = False
     fastlane = False
-    results = model.predict(source=frame)
+    results = model.predict(source=frame, verbose=False)
     for result in results:
         classes_names = result.names
         for box in result.boxes:
