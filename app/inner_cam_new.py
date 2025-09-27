@@ -23,7 +23,7 @@ from local_functions_new import (
 
 # ---------------- CONFIG ------------------
 CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 49
+CAMERA_INDEX_LINUX = 2
 BUFFER_LEN = 20
 COOLDOWN_THRESHOLD = 30
 VIOLATION_CLASSES = {
@@ -54,8 +54,8 @@ else:
         camera = cv2.VideoCapture(CAMERA_INDEX_LINUX, cv2.CAP_V4L2)
         camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         camera.set(cv2.CAP_PROP_FPS,30)
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH,1280)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT,720)
     elif CAMERA_TYPE == "csi":
         from nanocamera import Camera
         camera = Camera(device_id=0, fps=25, width=1280, height=720, flip=0)
@@ -69,8 +69,8 @@ last_minute = None
 
 
 FPS = 30
-VIDEO_FRAME_LEN = 60*FPS
-frame_buffer = [] #deque(maxlen=VIDEO_FRAME_LEN)
+VIDEO_FRAME_LEN = 10*FPS
+frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
 starttime = time.time()
 
 # ---------------- MAIN LOOP ------------------
@@ -161,8 +161,8 @@ while True:
     if last_minute is None:
         last_minute = current_minute
 
-    if current_time.second == 0 and last_minute != current_minute:
-    # if time.time() - starttime >= 60.0:
+    # if current_time.second == 0 and last_minute != current_minute:
+    if time.time() - starttime >= 10.0:
         # Fayl nomini boshlanish va tugash vaqtiga qarab
         start_time = last_minute.strftime("%H%M%S")
         end_time = (last_minute + timedelta(minutes=1)).strftime("%H%M%S")

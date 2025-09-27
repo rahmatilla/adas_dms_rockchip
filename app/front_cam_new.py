@@ -25,7 +25,7 @@ from collections import deque
 
 # Detect platform and set camera source
 CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 51
+CAMERA_INDEX_LINUX = 6
 os_name = platform.system()
 is_windows = os_name == 'Windows'
 COOLDOWN_THRESHOLD = 30
@@ -108,7 +108,7 @@ starttime = time.time()
 
 # ---------------- START AUDIO ------------------
 import threading
-threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_INNER,), daemon=True).start()
+threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_FRONT,), daemon=True).start()
 
 print("[INFO] Front camera started...")
 

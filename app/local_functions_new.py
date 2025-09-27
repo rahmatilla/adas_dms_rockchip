@@ -20,8 +20,8 @@ load_dotenv()
 # Global Constants
 AUDIO_SR = 44100
 CHANNELS = 1
-# AUDIO_DURATION = 60
-audio_buffer = []#deque(maxlen=AUDIO_SR * AUDIO_DURATION)
+AUDIO_DURATION = 10
+audio_buffer = deque(maxlen=AUDIO_SR * AUDIO_DURATION)
 recording = True
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
