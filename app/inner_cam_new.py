@@ -7,13 +7,14 @@ from collections import deque
 from datetime import datetime, timedelta
 from ultralytics import YOLO
 
-from local_functions import (
+from local_functions_new import (
     check_buffer,
     LOCAL_PATH,
     MODEL_PATH,
     REMOTE_PATH,
     INNER_MODEL,
     CAMERA_TYPE,
+    AUDIO_DEVICE_INNER,
     getColours,
     save_upload_in_background,
     play_alert,
@@ -41,7 +42,7 @@ class_buffer = {cls: deque([0] * BUFFER_LEN, maxlen=BUFFER_LEN) for cls in VIOLA
 inner_model = YOLO(MODEL_PATH + INNER_MODEL)
 
 camera = None
-threading.Thread(target=audio_record_loop, daemon=True).start()
+threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_INNER,),daemon=True).start()
 if is_windows:
     camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
     camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -68,8 +69,8 @@ last_minute = None
 
 
 FPS = 30
-VIDEO_FRAME_LEN = 6*FPS
-frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
+VIDEO_FRAME_LEN = 60*FPS
+frame_buffer = [] #deque(maxlen=VIDEO_FRAME_LEN)
 starttime = time.time()
 
 # ---------------- MAIN LOOP ------------------
@@ -140,41 +141,41 @@ while True:
             frame_buffer = check_buffer(frame_buffer, VIDEO_FRAME_LEN // 2)
             is_buffer_ready = True
 
-    if is_buffer_ready and len(frame_buffer) >= VIDEO_FRAME_LEN - 1:
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        fname = f"{timestamp}-{'-'.join(detected_classes)}.mp4"
-        output_file = f"{LOCAL_PATH}{fname}"
-        audio_file = f"{LOCAL_PATH}{timestamp}-{'-'.join(detected_classes)}.wav"
-        json_body = json.dumps({
-            "driver_name": "driver01",
-            "violation_type": ' '.join(detected_classes),
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "video_path": f"{REMOTE_PATH}{fname}"
-        })
+    # if is_buffer_ready and len(frame_buffer) >= VIDEO_FRAME_LEN - 1:
+    #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    #     fname = f"{timestamp}-{'-'.join(detected_classes)}.mp4"
+    #     output_file = f"{LOCAL_PATH}{fname}"
+    #     audio_file = f"{LOCAL_PATH}{timestamp}-{'-'.join(detected_classes)}.wav"
+    #     json_body = json.dumps({
+    #         "driver_name": "driver01",
+    #         "violation_type": ' '.join(detected_classes),
+    #         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+    #         "video_path": f"{REMOTE_PATH}{fname}"
+    #     })
 
-        save_upload_in_background(frame_buffer, output_file, FPS, json_body, audio_file)
+    #     save_upload_in_background(frame_buffer, output_file, FPS, json_body, audio_file)
 
-        is_buffer_ready = False
-        detected_classes.clear()
+    #     is_buffer_ready = False
+    #     detected_classes.clear()
 
     if last_minute is None:
         last_minute = current_minute
 
-    # if current_time.second == 0 and last_minute != current_minute:
-    # # if time.time() - starttime >= 60.0:
-    #     # Fayl nomini boshlanish va tugash vaqtiga qarab
-    #     start_time = last_minute.strftime("%H%M%S")
-    #     end_time = (last_minute + timedelta(minutes=1)).strftime("%H%M%S")
-    #     fname = f"{start_time}_{end_time}"
-    #     output_file = f"{LOCAL_PATH}Inner_{fname}.mp4"
-    #     audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
-    #     duration_sec = time.time() - starttime
-    #     FPS = len(frame_buffer)/duration_sec
-    #     print("Real FPS",FPS)
-    #     save_upload_in_background(list(frame_buffer), output_file, FPS, {}, audio_file)
-    #     frame_buffer.clear()
-    #     last_minute = current_minute
-    #     starttime = time.time()
+    if current_time.second == 0 and last_minute != current_minute:
+    # if time.time() - starttime >= 60.0:
+        # Fayl nomini boshlanish va tugash vaqtiga qarab
+        start_time = last_minute.strftime("%H%M%S")
+        end_time = (last_minute + timedelta(minutes=1)).strftime("%H%M%S")
+        fname = f"{start_time}_{end_time}"
+        output_file = f"{LOCAL_PATH}Inner_{fname}.mp4"
+        audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
+        duration_sec = time.time() - starttime
+        FPS = len(frame_buffer)/duration_sec
+        print("Real FPS",FPS)
+        save_upload_in_background(list(frame_buffer), output_file, FPS, {}, audio_file)
+        frame_buffer.clear()
+        last_minute = current_minute
+        starttime = time.time()
 
     try:
         cv2.namedWindow('Driver Monitor', cv2.WINDOW_NORMAL)

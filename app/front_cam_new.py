@@ -4,14 +4,15 @@ import json
 import platform
 from ultralytics import YOLO
 from datetime import datetime, timedelta
-from local_functions import (
+from local_functions_new import (
     check_buffer,
     MODEL_PATH, 
     LOCAL_PATH, 
     REMOTE_PATH, 
     FRONT_MODEL, 
     LANE_MODEL, 
-    CAMERA_TYPE, 
+    CAMERA_TYPE,
+    AUDIO_DEVICE_FRONT,
     REF_IMAGES, 
     get_width, 
     getColours,
@@ -107,7 +108,7 @@ starttime = time.time()
 
 # ---------------- START AUDIO ------------------
 import threading
-threading.Thread(target=audio_record_loop, daemon=True).start()
+threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_INNER,), daemon=True).start()
 
 print("[INFO] Front camera started...")
 
@@ -202,6 +203,7 @@ while True:
 
         #     is_buffer_ready = False
         #     detected_classes.clear()
+
     if last_minute is None:
         last_minute = current_minute
 
