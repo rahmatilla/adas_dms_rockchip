@@ -1,9 +1,9 @@
 import cv2
 import time
+import json
 import platform
 from ultralytics import YOLO
-from datetime import datetime
-import json
+from datetime import datetime, timedelta
 from local_functions import (
     check_buffer,
     MODEL_PATH, 
@@ -11,8 +11,7 @@ from local_functions import (
     REMOTE_PATH, 
     FRONT_MODEL, 
     LANE_MODEL, 
-    CAMERA_TYPE,
-    AUDIO_DEVICE_FRONT,
+    CAMERA_TYPE, 
     REF_IMAGES, 
     get_width, 
     getColours,
@@ -25,11 +24,10 @@ from collections import deque
 
 # Detect platform and set camera source
 CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 6
+CAMERA_INDEX_LINUX = 51
 os_name = platform.system()
 is_windows = os_name == 'Windows'
 COOLDOWN_THRESHOLD = 30
-VIDEO_FRAME_LEN = 180
 
 VIOLATION_CLASSES = {
     'lane_departure', 'fast_lane', 'follow_distance', 'shoulder_stop', 'red_light', 'stop'
@@ -52,7 +50,6 @@ front_model = YOLO(MODEL_PATH + FRONT_MODEL)
 object_class = list(front_model.names.values()) + ["lane_departure", "fast_lane"]
 buffer_len = 10
 class_buffer = {cls: deque([0] * buffer_len, maxlen=buffer_len) for cls in object_class}
-frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
 cooldown_class = {cls: 0 for cls in object_class}
 
 # Load reference images and compute scale factors for distance estimation
@@ -81,20 +78,11 @@ scale_factor = {
 
 if is_windows:
     cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
-    cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-    cap.set(cv2.CAP_PROP_FPS,30)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
     frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 else:
     if CAMERA_TYPE == "usb":
-        cap = cv2.VideoCapture(CAMERA_INDEX_LINUX, cv2.CAP_V4L2)
-        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
-        cap.set(cv2.CAP_PROP_FPS,30)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
-        print("FPS:", cap.get(cv2.CAP_PROP_FPS))
+        cap = cv2.VideoCapture(CAMERA_INDEX_LINUX)
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     elif CAMERA_TYPE == "csi":
@@ -111,9 +99,17 @@ detected_violations = set()
 detected_classes = set()
 is_buffer_ready = False
 
+last_minute = None
+FPS = 12
+VIDEO_FRAME_LEN = 60*FPS
+frame_buffer =[]   #deque(maxlen=VIDEO_FRAME_LEN)
+starttime = time.time()
+
 # ---------------- START AUDIO ------------------
 import threading
-threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_FRONT,),daemon=True).start()
+threading.Thread(target=audio_record_loop, daemon=True).start()
+
+print("[INFO] Front camera started...")
 
 # Main loop
 while True:
@@ -126,6 +122,9 @@ while True:
         frame = cap.read()
         if frame is None:
             continue
+    
+    current_time = datetime.now()
+    current_minute = current_time.replace(second=0, microsecond=0)
 
     frame_id += 1
     frame_buffer.append(frame)
@@ -134,33 +133,34 @@ while True:
     for cls in object_class:
         class_buffer[cls].append(0)
     if frame_id % 2 == 0:
-        results = front_model.predict(frame, stream=True, verbose=False)
-        for result in results:
-            class_names = result.names
-            for box in result.boxes:
-                x1, y1, x2, y2 = map(int, box.xyxy[0])
-                cls_id = int(box.cls[0])
-                class_name = class_names[cls_id]
+        results = front_model.predict(frame, verbose=False)
+        result = results[0]
+        class_names = result.names
+        for box in result.boxes:
+            x1, y1, x2, y2 = map(int, box.xyxy[0])
+            cls_id = int(box.cls[0])
+            class_name = class_names[cls_id]
 
-                conf = float(box.conf[0])
-                if conf < 0.4:
-                    continue
+            conf = float(box.conf[0])
+            if conf < 0.4:
+                continue
 
+            if class_name in VIOLATION_CLASSES:
                 class_buffer[class_name][-1] = 1
 
-                # Estimate distance if object is centered
-                if x1 < middle_x < x2 and class_name in ["car", "truck"]:
-                    obj_width_in_frame = x2 - x1
-                    normalized_width = obj_width_in_frame / frame_width
-                    if normalized_width > 0:
-                        distance = scale_factor[class_name] / normalized_width
-                        cv2.putText(frame, f"Distance = {distance:.2f}m", (50, 50), fonts, 0.6, RED, 2)
-                        cv2.rectangle(frame, (x1, y1), (x2, y2), (GREEN), 2)
-                        cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (GREEN), 2)
-                else:
-                    colour = getColours(cls_id)
-                    cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
-                    cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
+            # Estimate distance if object is centered
+            if x1 < middle_x < x2 and class_name in ["car", "truck"]:
+                obj_width_in_frame = x2 - x1
+                normalized_width = obj_width_in_frame / frame_width
+                if normalized_width > 0:
+                    distance = scale_factor[class_name] / normalized_width
+                    cv2.putText(frame, f"Distance = {distance:.2f}m", (50, 50), fonts, 0.6, RED, 2)
+                    cv2.rectangle(frame, (x1, y1), (x2, y2), (GREEN), 2)
+                    cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (GREEN), 2)
+            else:
+                colour = getColours(cls_id)
+                cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
+                cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, colour, 2)
 
         # Lane departure detection
         frame, lane_departure, fast_lane = is_lane_departure_and_fast_lane(model_lane, frame, departure_threshold, middle_x, frame_height)
@@ -169,44 +169,60 @@ while True:
         if fast_lane:
             class_buffer["fast_lane"][-1] = 1    
         # Alert logic
-        current_time = time.time()
+        currenttime = time.time()
         for cls, buf in class_buffer.items():
-            if sum(buf) / buffer_len >= 0.4 and current_time - cooldown_class[cls] >= 5:
+            if sum(buf) / buffer_len >= 0.4 and currenttime - cooldown_class[cls] >= 5:
                 play_alert(cls)
-                cooldown_class[cls] = current_time
+                cooldown_class[cls] = currenttime
                 if cls in VIOLATION_CLASSES:
                     detected_violations.add(cls)
                     class_buffer[cls].clear()
                     class_buffer[cls].extend([0] * buffer_len)
 
-        if detected_violations:
-            detected_classes.update(detected_violations)
-            detected_violations.clear()
-            if not is_buffer_ready:
-                frame_buffer = check_buffer(frame_buffer, VIDEO_FRAME_LEN // 2)
-                is_buffer_ready = True
+        # if detected_violations:
+        #     detected_classes.update(detected_violations)
+        #     detected_violations.clear()
+        #     if not is_buffer_ready:
+        #         frame_buffer = check_buffer(frame_buffer, VIDEO_FRAME_LEN // 2)
+        #         is_buffer_ready = True
 
-        if is_buffer_ready and len(frame_buffer) >= VIDEO_FRAME_LEN - 1:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            fname = f"{timestamp}-{'-'.join(detected_classes)}.mp4"
-            output_file = f"{LOCAL_PATH}{fname}"
-            audio_file = f"{LOCAL_PATH}{timestamp}-{'-'.join(detected_classes)}.wav"
-            json_body = json.dumps({
-                "driver_name": "driver01",
-                "violation_type": ' '.join(detected_classes),
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "video_path": f"{REMOTE_PATH}{fname}"
-            })
+        # if is_buffer_ready and len(frame_buffer) >= VIDEO_FRAME_LEN - 1:
+        #     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        #     fname = f"{timestamp}-{'-'.join(detected_classes)}.mp4"
+        #     output_file = f"{LOCAL_PATH}{fname}"
+        #     audio_file = f"{LOCAL_PATH}{timestamp}-{'-'.join(detected_classes)}.wav"
+        #     json_body = json.dumps({
+        #         "driver_name": "driver01",
+        #         "violation_type": ' '.join(detected_classes),
+        #         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        #         "video_path": f"{REMOTE_PATH}{fname}"
+        #     })
 
-            save_upload_in_background(frame_buffer, output_file, 30, json_body, audio_file)
+        #     save_upload_in_background(frame_buffer, output_file, FPS, json_body, audio_file)
 
-            is_buffer_ready = False
-            detected_classes.clear()
+        #     is_buffer_ready = False
+        #     detected_classes.clear()
+    if last_minute is None:
+        last_minute = current_minute
+
+    if current_time.second == 0 and last_minute != current_minute:
+    # if time.time() - starttime >= 60.0:
+        # Fayl nomini boshlanish va tugash vaqtiga qarab
+        start_time = last_minute.strftime("%H%M%S")
+        end_time = (last_minute + timedelta(minutes=1)).strftime("%H%M%S")
+        fname = f"{start_time}_{end_time}"
+        output_file = f"{LOCAL_PATH}Front_{fname}.mp4"
+        audio_file = f"{LOCAL_PATH}Front_{fname}.wav"
+        duration_sec = time.time() - starttime
+        FPS = len(frame_buffer)/duration_sec
+        print("Real FPS",FPS)
+        save_upload_in_background(list(frame_buffer), output_file, FPS, {}, audio_file)
+        frame_buffer.clear()
+        last_minute = current_minute
+        starttime = time.time()
 
     # Display result
     try:
-        cv2.namedWindow('ADAS View', cv2.WINDOW_NORMAL)
-        cv2.resizeWindow('ADAS View', 960,540)
         cv2.imshow("ADAS View", frame)
         if cv2.waitKey(1) == ord("q"):
             break

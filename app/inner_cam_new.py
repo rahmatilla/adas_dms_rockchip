@@ -4,7 +4,7 @@ import time
 import threading
 import platform
 from collections import deque
-from datetime import datetime
+from datetime import datetime, timedelta
 from ultralytics import YOLO
 
 from local_functions import (
@@ -14,7 +14,6 @@ from local_functions import (
     REMOTE_PATH,
     INNER_MODEL,
     CAMERA_TYPE,
-    AUDIO_DEVICE_INNER,
     getColours,
     save_upload_in_background,
     play_alert,
@@ -23,9 +22,9 @@ from local_functions import (
 
 # ---------------- CONFIG ------------------
 CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 2 #49
+CAMERA_INDEX_LINUX = 49
 BUFFER_LEN = 20
-VIDEO_FRAME_LEN = 180  # 6 sec at 30 FPS
+COOLDOWN_THRESHOLD = 30
 VIOLATION_CLASSES = {
     'drinking', 'eating', 'eyes_closed', 'mobile_usage', 'no_seatbelt',
     'smoking', 'yawn', "inattentive_driving"
@@ -38,11 +37,11 @@ OBSTRUCTION_CLASSES = {
 os_name = platform.system()
 is_windows = os_name == 'Windows'
 class_buffer = {cls: deque([0] * BUFFER_LEN, maxlen=BUFFER_LEN) for cls in VIOLATION_CLASSES}
-frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
+
 inner_model = YOLO(MODEL_PATH + INNER_MODEL)
 
 camera = None
-threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_INNER,),daemon=True).start()
+threading.Thread(target=audio_record_loop, daemon=True).start()
 if is_windows:
     camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
     camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -56,16 +55,22 @@ else:
         camera.set(cv2.CAP_PROP_FPS,30)
         camera.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
-        print("FPS:", camera.get(cv2.CAP_PROP_FPS))
     elif CAMERA_TYPE == "csi":
         from nanocamera import Camera
-        camera = Camera(device_id=0, fps=30, width=1280, height=720, flip=0)
+        camera = Camera(device_id=0, fps=25, width=1280, height=720, flip=0)
 
 cooldown_timers = {cls: 0 for cls in VIOLATION_CLASSES}
 detected_violations = set()
 detected_classes = set()
 is_buffer_ready = False
 last_seen_driver = time.time()
+last_minute = None
+
+
+FPS = 30
+VIDEO_FRAME_LEN = 6*FPS
+frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
+starttime = time.time()
 
 # ---------------- MAIN LOOP ------------------
 while True:
@@ -78,38 +83,41 @@ while True:
         frame = camera.read()
         if frame is None:
             continue
+    
+    current_time = datetime.now()
+    current_minute = current_time.replace(second=0, microsecond=0)
 
     frame_buffer.append(frame)
-    results = inner_model.predict(frame, stream=True, verbose=False)
+    results = inner_model.predict(frame, verbose=False)
 
     for cls in VIOLATION_CLASSES:
         class_buffer[cls].append(0)
 
-    for result in results:
-        class_names = result.names
-        for box in result.boxes:
-            x1, y1, x2, y2 = map(int, box.xyxy[0])
-            cls_id = int(box.cls[0])
-            cls_name = class_names[cls_id]
-            conf = float(box.conf[0])
+    result = results[0]
+    class_names = result.names
+    for box in result.boxes:
+        x1, y1, x2, y2 = map(int, box.xyxy[0])
+        cls_id = int(box.cls[0])
+        cls_name = class_names[cls_id]
+        conf = float(box.conf[0])
 
-            threshold = 0.7 if cls_name == "eyes_closed" else 0.4
-            if conf > threshold:
-                color = getColours(cls_id)
-                cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
-                cv2.putText(frame, f'{cls_name} {conf:.2f}', (x1, y1),
-                            cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
+        threshold = 0.7 if cls_name == "eyes_closed" else 0.4
+        if conf > threshold:
+            color = getColours(cls_id)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+            cv2.putText(frame, f'{cls_name} {conf:.2f}', (x1, y1),
+                        cv2.FONT_HERSHEY_SIMPLEX, 1, color, 2)
 
-                if cls_name in VIOLATION_CLASSES:
-                    class_buffer[cls_name][-1] = 1
+            if cls_name in VIOLATION_CLASSES:
+                class_buffer[cls_name][-1] = 1
 
-                if cls_name in OBSTRUCTION_CLASSES:
-                    last_seen_driver = time.time()
+            if cls_name in OBSTRUCTION_CLASSES:
+                last_seen_driver = time.time()
 
     now = time.time()
     for cls, buf in class_buffer.items():
         if sum(buf) / BUFFER_LEN >= 0.8:
-            if now - cooldown_timers[cls] >= 30:
+            if now - cooldown_timers[cls] >= COOLDOWN_THRESHOLD:
                 detected_violations.add(cls)
                 cooldown_timers[cls] = now
                 play_alert(cls)
@@ -120,7 +128,7 @@ while True:
         if "camera_obstructed" not in class_buffer:
             class_buffer["camera_obstructed"] = deque([1] * BUFFER_LEN, maxlen=BUFFER_LEN)
             cooldown_timers["camera_obstructed"] = 0
-        if now - cooldown_timers["camera_obstructed"] >= 30:
+        if now - cooldown_timers["camera_obstructed"] >= COOLDOWN_THRESHOLD:
             detected_violations.add("camera_obstructed")
             cooldown_timers["camera_obstructed"] = now
             play_alert("camera_obstructed")
@@ -144,10 +152,30 @@ while True:
             "video_path": f"{REMOTE_PATH}{fname}"
         })
 
-        save_upload_in_background(frame_buffer, output_file, 30, json_body, audio_file)
+        save_upload_in_background(frame_buffer, output_file, FPS, json_body, audio_file)
 
         is_buffer_ready = False
         detected_classes.clear()
+
+    if last_minute is None:
+        last_minute = current_minute
+
+    # if current_time.second == 0 and last_minute != current_minute:
+    # # if time.time() - starttime >= 60.0:
+    #     # Fayl nomini boshlanish va tugash vaqtiga qarab
+    #     start_time = last_minute.strftime("%H%M%S")
+    #     end_time = (last_minute + timedelta(minutes=1)).strftime("%H%M%S")
+    #     fname = f"{start_time}_{end_time}"
+    #     output_file = f"{LOCAL_PATH}Inner_{fname}.mp4"
+    #     audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
+    #     duration_sec = time.time() - starttime
+    #     FPS = len(frame_buffer)/duration_sec
+    #     print("Real FPS",FPS)
+    #     save_upload_in_background(list(frame_buffer), output_file, FPS, {}, audio_file)
+    #     frame_buffer.clear()
+    #     last_minute = current_minute
+    #     starttime = time.time()
+
     try:
         cv2.namedWindow('Driver Monitor', cv2.WINDOW_NORMAL)
         cv2.resizeWindow('Driver Monitor', 960,540)

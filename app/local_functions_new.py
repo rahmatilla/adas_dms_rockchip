@@ -20,8 +20,8 @@ load_dotenv()
 # Global Constants
 AUDIO_SR = 44100
 CHANNELS = 1
-AUDIO_DURATION = 6
-audio_buffer = deque(maxlen=AUDIO_SR * AUDIO_DURATION)
+# AUDIO_DURATION = 60
+audio_buffer = []#deque(maxlen=AUDIO_SR * AUDIO_DURATION)
 recording = True
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -41,8 +41,6 @@ INNER_MODEL = os.getenv("INNER_MODEL")
 FRONT_MODEL = os.getenv("FRONT_MODEL")
 LANE_MODEL = os.getenv("LANE_MODEL")
 CAMERA_TYPE = os.getenv("CAMERA_TYPE")
-AUDIO_DEVICE_INNER = os.getenv("AUDIO_DEVICE_INNER", "default")
-AUDIO_DEVICE_FRONT = os.getenv("AUDIO_DEVICE_FRONT", "default")
 
 headers = {"Content-Type": "application/json", "Accept": "application/json"}
 
@@ -105,28 +103,16 @@ violation_sounds = {
     "fast_lane": f"{SOUND_PATH}fast_lane.mp3",
 }
 
-def audio_record_loop(AUDIO_DEVICE):
+def audio_record_loop():
     def callback(indata, frames, time_info, status):
         audio_buffer.extend(indata[:, 0])
-
-    try:
-        device = int(AUDIO_DEVICE)
-    except ValueError:
-        device = AUDIO_DEVICE
-
-    print(f"[INFO] Using audio device: {device}")
-
-    with sd.InputStream(
-        samplerate=AUDIO_SR,
-        channels=CHANNELS,
-        device=device,
-        callback=callback
-    ):
+    with sd.InputStream(samplerate=AUDIO_SR, channels=CHANNELS, callback=callback):
         while recording:
             sd.sleep(100)
 
 def save_audio_from_buffer(filename):
     sf.write(filename, np.array(audio_buffer), AUDIO_SR)
+    audio_buffer.clear() 
 
 def check_buffer(buffer, frame_number):
     while len(buffer) > frame_number:
@@ -141,26 +127,31 @@ def upload_to_server(file_path, json_body):
         with SCPClient(ssh.get_transport()) as scp:
             scp.put(file_path, REMOTE_PATH)
         ssh.close()
-        requests.post(url=URL, headers=headers, data=json_body, verify=False)
+        # requests.post(url=URL, headers=headers, data=json_body, verify=False)
     except Exception as e:
         print(f"Upload failed: {e}")
 
 def save_video(buffer, output_file, fps, audio_file=None):
-    frames = list(buffer)
+    frames = buffer
+    if not frames:
+        print(f"[WARN] Empty buffer, nothing to save: {output_file}")
+        return
     height, width, _ = frames[0].shape
     command = [
         "ffmpeg", "-y", "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "bgr24",
-        "-s", f"{width}x{height}", "-r", str(fps), "-i", "-"
+        "-s", f"{width}x{height}", "-i", "-"
     ]
     if audio_file:
         command += ["-i", audio_file, "-c:a", "aac", "-b:a", "96k"]
-    command += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "28", "-preset", "ultrafast", output_file]
+
+    command += ["-r", str(fps), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+                "-crf", "28", "-preset", "ultrafast", output_file]
 
     process = subprocess.Popen(command, stdin=subprocess.PIPE)
     for frame in frames:
         process.stdin.write(frame.astype(np.uint8).tobytes())
     process.stdin.close()
-    process.wait()
+    process.communicate()
 
 def save_upload_in_background(buffer, output_file, fps, json_body, audio_file=None):
     def task():
@@ -221,28 +212,28 @@ def is_lane_departure_and_fast_lane(model, frame, departure_threshold, frame_cen
     lanedeparture = False
     fastlane = False
     results = model.predict(source=frame, verbose=False)
-    for result in results:
-        classes_names = result.names
-        for box in result.boxes:
-            [x1, y1, x2, y2] = map(int, box.xyxy[0])
-            cls = int(box.cls[0])
-            class_name = classes_names[cls]
-            x_center = (x1 + x2) / 2
-             # Порог вероятности
-            threshold =  0.4
-            if box.conf[0] > threshold:
-                if  x_center < frame_center_x:
-                    class_name = "left_"+class_name
-                else:
-                    class_name = "right_"+class_name
-                detected_lines.add(class_name)
-                if abs(x_center - frame_center_x) < departure_threshold:
-                    lanedeparture = True
-                #     cv2.putText(frame, f"Lane departure", (50, 50), fonts, 1, (RED), 2)
-                # colour = getColours(cls)
-                # cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
-                # cv2.putText(frame, f'{class_name} {box.conf[0]:.2f}', (x1, y1),
-                #             cv2.FONT_HERSHEY_SIMPLEX, 1, colour, 2)
+    result = results[0]
+    classes_names = result.names
+    for box in result.boxes:
+        [x1, y1, x2, y2] = map(int, box.xyxy[0])
+        cls = int(box.cls[0])
+        class_name = classes_names[cls]
+        x_center = (x1 + x2) / 2
+            # Порог вероятности
+        threshold =  0.4
+        if box.conf[0] > threshold:
+            if  x_center < frame_center_x:
+                class_name = "left_"+class_name
+            else:
+                class_name = "right_"+class_name
+            detected_lines.add(class_name)
+            if abs(x_center - frame_center_x) < departure_threshold:
+                lanedeparture = True
+            #     cv2.putText(frame, f"Lane departure", (50, 50), fonts, 1, (RED), 2)
+            # colour = getColours(cls)
+            # cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
+            # cv2.putText(frame, f'{class_name} {box.conf[0]:.2f}', (x1, y1),
+            #             cv2.FONT_HERSHEY_SIMPLEX, 1, colour, 2)
     if check_to_fast_lane(detected_lines):
         fastlane = True
     # # Нарисовать вертикальную линию в центре кадра (машина)
