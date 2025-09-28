@@ -17,10 +17,10 @@ RECORD_DIR = "./recordings"
 os.makedirs(RECORD_DIR, exist_ok=True)
 
 # ------------------ Камеры + Микрофоны ------------------
-FRONT_CAM = 0       # nvarguscamerasrc sensor-id
-INNER_CAM = 1
+FRONT_CAM = 6      # nvarguscamerasrc sensor-id
+INNER_CAM = 2
 FRONT_AUDIO = "hw:1,0"   # изменить под твой микрофон
-INNER_AUDIO = "hw:1,0"   # или hw:1,2 — см. arecord -l
+INNER_AUDIO = "hw:0,0"   # или hw:1,2 — см. arecord -l
 
 # ------------------ Энкодер ------------------
 def detect_encoder():
@@ -83,3 +83,9 @@ if __name__ == "__main__":
         t.join()
 
     logger.info("🎬 Запись всех камер завершена.")
+
+#sudo modprobe v4l2loopback devices=2 video_nr=10,11 card_label="VirtualCam1,VirtualCam2"
+
+#ffmpeg   -thread_queue_size 512 -f v4l2 -input_format mjpeg -framerate 30 -video_size 1280x720 -i /dev/video2   -thread_queue_size 512 -f alsa -i hw:0,0     -map 0:v -pix_fmt yuv420p -f v4l2 /dev/video10     -map 0:v -map 1:a   -c:v libx264 -preset veryfast -crf 28   -c:a aac -b:a 128k   -f segment -strftime 1 -segment_time 60 -reset_timestamps 1 out_%Y-%m-%d_%H-%M-%S.mp4
+#ffmpeg   -thread_queue_size 512 -f v4l2 -input_format mjpeg -framerate 30 -video_size 1280x720 -i /dev/video6   -thread_queue_size 512 -f alsa -i hw:1,0     -map 0:v -pix_fmt yuv420p -f v4l2 /dev/video11     -map 0:v -map 1:a   -c:v libx264 -preset veryfast -crf 28   -c:a aac -b:a 128k   -f segment -strftime 1 -segment_time 60 -reset_timestamps 1 out_%Y-%m-%d_%H-%M-%S.mp4
+
