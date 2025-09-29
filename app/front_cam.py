@@ -25,7 +25,7 @@ from collections import deque
 
 # Detect platform and set camera source
 CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 6
+CAMERA_INDEX_LINUX = 11
 os_name = platform.system()
 is_windows = os_name == 'Windows'
 COOLDOWN_THRESHOLD = 30

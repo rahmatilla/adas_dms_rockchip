@@ -19,7 +19,7 @@ from pathlib import Path
 from datetime import datetime
 import requests
 
-# ----------------- CONFIG -----------------0.5
+# ----------------- CONFIG -----------------
 # Edit these to match your environment
 CAM_A_VIDEO = "/dev/video2"
 CAM_A_AUDIO = "hw:0,0"
@@ -167,6 +167,39 @@ def build_ffmpeg_cmd(video_dev, audio_dev, vdev, outdir, camera_name):
     ]
     return cmd
 
+# def build_ffmpeg_cmd(video_dev, audio_dev, vdev, outdir, camera_name):
+#     """
+#     FFmpeg command:
+#       - video_dev + audio_dev ni o‘qiydi
+#       - virtual camera ga chiqaradi
+#       - segmentlarga yozadi (.tmp → .mp4)
+#     """
+#     outpattern = str(Path(outdir) / "%Y-%m-%d_%H-%M-%S.mp4.tmp")
+#     cmd = [
+#         "ffmpeg",
+#         "-thread_queue_size", "512",
+#         "-f", "v4l2",
+#         "-input_format", "mjpeg",
+#         "-framerate", str(FRAMERATE),
+#         "-video_size", VIDEO_SIZE,
+#         "-i", video_dev,
+#         "-thread_queue_size", "512",
+#         "-f", "alsa",
+#         "-i", audio_dev,
+#         # map raw video to virtual camera (no h264)
+#         "-map", "0:v",
+#         "-pix_fmt", "yuv420p",
+#         "-f", "v4l2", vdev,
+#         # now map video+audio to segment writer
+#         "-map", "0:v", "-map", "1:a",
+#         "-c:v", "libx264", "-preset", PRESET, "-crf", str(CRF),
+#         "-c:a", "aac", "-b:a", AUDIO_BITRATE,
+#         "-f", "mp4", "segment", "-strftime", "1", "-segment_time", "60", "-reset_timestamps", "1",
+#         outpattern
+#     ]
+#     return cmd
+
+
 # ---------------- file watcher ----------------
 
 def watch_dirs_and_register(conn, dirs_cameras):
@@ -179,12 +212,33 @@ def watch_dirs_and_register(conn, dirs_cameras):
                     # only register finished files (size non-zero and mtime older than 1s)
                     try:
                         st = path.stat()
-                        if st.st_size > 0 and (time.time() - st.st_mtime) > 3:
+                        if st.st_size > 100 and (time.time() - st.st_mtime) > 5:
                             add_file_record(conn, str(path), cam)
                             seen.add(str(path))
                     except FileNotFoundError:
                         continue
         time.sleep(SCAN_INTERVAL)
+
+# def watch_dirs_and_register(conn, dirs_cameras):
+#     """Yangi tugagan .mp4 fayllarni DBga qo‘shadi."""
+#     seen = set()
+#     while True:
+#         for d, cam in dirs_cameras:
+#             # faqat tugagan fayllarni ko‘rish
+#             for path in sorted(Path(d).glob("*.mp4.tmp")):
+#                 final_path = str(path).replace(".mp4.tmp", ".mp4")
+#                 try:
+#                     st = path.stat()
+#                     # faqat to‘liq yozib bo‘lingan (mtime 2 sekunddan eski)
+#                     if st.st_size > 0 and (time.time() - st.st_mtime) > 2:
+#                         # rename -> .mp4
+#                         new_path = Path(final_path)
+#                         path.rename(new_path)
+#                         add_file_record(conn, str(new_path), cam)
+#                         seen.add(str(new_path))
+#                 except FileNotFoundError:
+#                     continue
+#         time.sleep(SCAN_INTERVAL)
 
 # ---------------- uploader ----------------
 
@@ -204,34 +258,58 @@ def upload_file(session, path):
     except Exception as e:
         return False, str(e)
 
+# def uploader_loop(conn, stop_event):
+#     session = requests.Session()
+#     backoff = UPLOAD_RETRY_BASE
+#     while not stop_event.is_set():
+#         cur = conn.cursor()
+#         cur.execute("SELECT path, retries FROM files WHERE status IN ('pending','error') ORDER BY created_at")
+#         rows = cur.fetchall()
+#         if not rows:
+#             time.sleep(2)
+#             continue
+#         for path, retries in rows:
+#             if stop_event.is_set():
+#                 break
+#             # set uploading only if currently pending (avoid races)
+#             mark_uploading(conn, path)
+#             success, err = upload_file(session, path)
+#             if success:
+#                 mark_uploaded(conn, path)
+#                 print(f"[UPLOAD] Sent {path}")
+#                 backoff = UPLOAD_RETRY_BASE
+#             else:
+#                 mark_error(conn, path, err)
+#                 print(f"[UPLOAD] Failed {path}: {err}")
+#                 # exponential backoff on global loop
+#                 time.sleep(min(backoff, 300))
+#                 backoff *= 2
+#         # small sleep to avoid busy loop
+#         time.sleep(1)
+
 def uploader_loop(conn, stop_event):
+    """Doimiy cheksiz upload retry loop."""
     session = requests.Session()
-    backoff = UPLOAD_RETRY_BASE
     while not stop_event.is_set():
         cur = conn.cursor()
-        cur.execute("SELECT path, retries FROM files WHERE status IN ('pending','error') ORDER BY created_at")
+        cur.execute("SELECT path FROM files WHERE status='pending' ORDER BY created_at")
         rows = cur.fetchall()
         if not rows:
-            time.sleep(2)
+            time.sleep(3)
             continue
-        for path, retries in rows:
+        for (path,) in rows:
             if stop_event.is_set():
                 break
-            # set uploading only if currently pending (avoid races)
-            mark_uploading(conn, path)
+            # upload qilamiz
             success, err = upload_file(session, path)
             if success:
                 mark_uploaded(conn, path)
                 print(f"[UPLOAD] Sent {path}")
-                backoff = UPLOAD_RETRY_BASE
             else:
-                mark_error(conn, path, err)
+                # status 'pending' qoladi → keyingi loopda qayta urinadi
                 print(f"[UPLOAD] Failed {path}: {err}")
-                # exponential backoff on global loop
-                time.sleep(min(backoff, 300))
-                backoff *= 2
-        # small sleep to avoid busy loop
-        time.sleep(1)
+                time.sleep(10)  # keyingi urinish oldidan kutish
+
 
 # ---------------- main process management ----------------
 
@@ -303,7 +381,7 @@ def main():
                 print("[MAIN] Killing ffmpeg pid", p.pid)
                 p.kill()
         conn.close()
-        os._exit(0)
+        sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_sigint)
     signal.signal(signal.SIGTERM, handle_sigint)

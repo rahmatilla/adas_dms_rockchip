@@ -23,7 +23,7 @@ from local_functions import (
 
 # ---------------- CONFIG ------------------
 CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 2 #49
+CAMERA_INDEX_LINUX = 10 #49
 BUFFER_LEN = 20
 VIDEO_FRAME_LEN = 180  # 6 sec at 30 FPS
 VIOLATION_CLASSES = {
