@@ -4,27 +4,25 @@ import json
 import platform
 from ultralytics import YOLO
 from datetime import datetime, timedelta
-from local_functions_new import (
-    check_buffer,
+from local_functions1 import (
     MODEL_PATH, 
     LOCAL_PATH, 
     REMOTE_PATH, 
     FRONT_MODEL, 
     LANE_MODEL, 
     CAMERA_TYPE,
-    AUDIO_DEVICE_FRONT,
     REF_IMAGES, 
     get_width, 
     getColours,
     save_upload_in_background,
     play_alert, 
     is_lane_departure_and_fast_lane, 
-    audio_record_loop
 )
 from collections import deque
 
 # Detect platform and set camera source
-CAMERA_INDEX = 6
+CAMERA_INDEX = 1
+CAMERA_INDEX_LINUX = 6
 os_name = platform.system()
 is_windows = os_name == 'Windows'
 COOLDOWN_THRESHOLD = 30
@@ -82,7 +80,7 @@ if is_windows:
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 else:
     if CAMERA_TYPE == "usb":
-        cap = cv2.VideoCapture(CAMERA_INDEX)
+        cap = cv2.VideoCapture(CAMERA_INDEX_LINUX)
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     elif CAMERA_TYPE == "csi":
@@ -97,17 +95,6 @@ departure_threshold = frame_width // 15
 frame_id = 0
 detected_violations = set()
 detected_classes = set()
-is_buffer_ready = False
-
-VIDEO_SEGMENT_LEN = 10
-FPS = 30
-VIDEO_FRAME_LEN = VIDEO_SEGMENT_LEN*FPS
-frame_buffer =[]   #deque(maxlen=VIDEO_FRAME_LEN)
-starttime = time.time()
-
-# ---------------- START AUDIO ------------------
-# import threading
-# threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_FRONT,), daemon=True).start()
 
 print("[INFO] Front camera started...")
 
@@ -124,7 +111,6 @@ while True:
             continue
     
     frame_id += 1
-    frame_buffer.append(frame)
 
     # Reset class detection buffer
     for cls in object_class:
@@ -176,20 +162,20 @@ while True:
                     class_buffer[cls].clear()
                     class_buffer[cls].extend([0] * buffer_len)
 
-    endtime = time.time()
-    if endtime - starttime >= VIDEO_SEGMENT_LEN:
-        # Fayl nomini boshlanish va tugash vaqtiga qarab
-        start_time = starttime.strftime("%H%M%S")
-        end_time = endtime.strftime("%H%M%S")
-        fname = f"{start_time}_{end_time}"
-        output_file = f"{LOCAL_PATH}Front_{fname}.mp4"
-        # audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
-        duration_sec = time.time() - starttime
-        FPS = len(frame_buffer)/duration_sec
-        print("Real FPS",FPS)
-        save_upload_in_background(list(frame_buffer), output_file, FPS, {})
-        frame_buffer.clear()
-        starttime = time.time()
+        if detected_violations:
+            detected_classes.update(detected_violations)
+            detected_violations.clear()
+        
+        if detected_classes:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            json_body = json.dumps({
+                "driver_name": "driver01",
+                "violation_type": ' '.join(detected_classes),
+                "timestamp": timestamp,
+            })
+            save_upload_in_background(frame_buffer, output_file, FPS, json_body, audio_file)
+            detected_classes.clear()
+
 
     # Display result
     try:

@@ -1,28 +1,25 @@
 import cv2
 import json
 import time
-import threading
 import platform
 from collections import deque
 from datetime import datetime, timedelta
 from ultralytics import YOLO
 
-from local_functions_new import (
-    check_buffer,
+from local_functions1 import (
     LOCAL_PATH,
     MODEL_PATH,
     REMOTE_PATH,
     INNER_MODEL,
     CAMERA_TYPE,
-    AUDIO_DEVICE_INNER,
     getColours,
     save_upload_in_background,
-    play_alert,
-    audio_record_loop
+    play_alert
 )
 
 # ---------------- CONFIG ------------------
-CAMERA_INDEX = 2
+CAMERA_INDEX = 1
+CAMERA_INDEX_LINUX = 2
 BUFFER_LEN = 20
 COOLDOWN_THRESHOLD = 30
 VIOLATION_CLASSES = {
@@ -41,7 +38,7 @@ class_buffer = {cls: deque([0] * BUFFER_LEN, maxlen=BUFFER_LEN) for cls in VIOLA
 inner_model = YOLO(MODEL_PATH + INNER_MODEL)
 
 camera = None
-# threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_INNER,),daemon=True).start()
+
 if is_windows:
     camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
     camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -50,7 +47,7 @@ if is_windows:
     camera.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
 else:
     if CAMERA_TYPE == "usb":
-        camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
+        camera = cv2.VideoCapture(CAMERA_INDEX_LINUX, cv2.CAP_V4L2)
         camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         camera.set(cv2.CAP_PROP_FPS,30)
         camera.set(cv2.CAP_PROP_FRAME_WIDTH,1280)
@@ -62,14 +59,7 @@ else:
 cooldown_timers = {cls: 0 for cls in VIOLATION_CLASSES}
 detected_violations = set()
 detected_classes = set()
-is_buffer_ready = False
 last_seen_driver = time.time()
-
-VIDEO_SEGMENT_LEN = 10
-FPS = 30
-VIDEO_FRAME_LEN = VIDEO_SEGMENT_LEN*FPS
-frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
-starttime = time.time()
 
 # ---------------- MAIN LOOP ------------------
 while True:
@@ -83,7 +73,6 @@ while True:
         if frame is None:
             continue
     
-    frame_buffer.append(frame)
     results = inner_model.predict(frame, verbose=False)
 
     for cls in VIOLATION_CLASSES:
@@ -132,24 +121,16 @@ while True:
     if detected_violations:
         detected_classes.update(detected_violations)
         detected_violations.clear()
-        if not is_buffer_ready:
-            frame_buffer = check_buffer(frame_buffer, VIDEO_FRAME_LEN // 2)
-            is_buffer_ready = True
-
-    endtime = time.time()
-    if endtime - starttime >= VIDEO_SEGMENT_LEN:
-        # Fayl nomini boshlanish va tugash vaqtiga qarab
-        start_time = starttime.strftime("%H%M%S")
-        end_time = endtime.strftime("%H%M%S")
-        fname = f"{start_time}_{end_time}"
-        output_file = f"{LOCAL_PATH}Inner_{fname}.mp4"
-        # audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
-        duration_sec = time.time() - starttime
-        FPS = len(frame_buffer)/duration_sec
-        print("Real FPS",FPS)
-        save_upload_in_background(list(frame_buffer), output_file, FPS, {})
-        frame_buffer.clear()
-        starttime = time.time()
+    
+    if detected_classes:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        json_body = json.dumps({
+            "driver_name": "driver01",
+            "violation_type": ' '.join(detected_classes),
+            "timestamp": timestamp,
+        })
+        save_upload_in_background(frame_buffer, output_file, FPS, json_body, audio_file)
+        detected_classes.clear()
 
     try:
         cv2.namedWindow('Driver Monitor', cv2.WINDOW_NORMAL)
