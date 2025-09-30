@@ -15,6 +15,7 @@ from local_functions_new import (
     INNER_MODEL,
     CAMERA_TYPE,
     AUDIO_DEVICE_INNER,
+    VIDEO_SEGMENT_LEN,
     getColours,
     save_upload_in_background,
     play_alert,
@@ -41,7 +42,7 @@ class_buffer = {cls: deque([0] * BUFFER_LEN, maxlen=BUFFER_LEN) for cls in VIOLA
 inner_model = YOLO(MODEL_PATH + INNER_MODEL)
 
 camera = None
-# threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_INNER,),daemon=True).start()
+threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_INNER,),daemon=True).start()
 if is_windows:
     camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
     camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
@@ -65,11 +66,15 @@ detected_classes = set()
 is_buffer_ready = False
 last_seen_driver = time.time()
 
-VIDEO_SEGMENT_LEN = 10
 FPS = 30
 VIDEO_FRAME_LEN = VIDEO_SEGMENT_LEN*FPS
 frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
-starttime = time.time()
+# starttime = time.time()
+
+current = datetime.now()
+aligned_second = current.second - (current.second % VIDEO_SEGMENT_LEN)
+segment_start = current.replace(second=aligned_second, microsecond=0)
+segment_end = segment_start + timedelta(seconds=VIDEO_SEGMENT_LEN)
 
 # ---------------- MAIN LOOP ------------------
 while True:
@@ -84,6 +89,7 @@ while True:
             continue
     
     frame_buffer.append(frame)
+    current = datetime.now()
     results = inner_model.predict(frame, verbose=False)
 
     for cls in VIOLATION_CLASSES:
@@ -132,24 +138,33 @@ while True:
     if detected_violations:
         detected_classes.update(detected_violations)
         detected_violations.clear()
-        if not is_buffer_ready:
-            frame_buffer = check_buffer(frame_buffer, VIDEO_FRAME_LEN // 2)
-            is_buffer_ready = True
+        # if not is_buffer_ready:
+        #     frame_buffer = check_buffer(frame_buffer, VIDEO_FRAME_LEN // 2)
+        #     is_buffer_ready = True
 
-    endtime = time.time()
-    if endtime - starttime >= VIDEO_SEGMENT_LEN:
+    # endtime = time.time()
+    current = datetime.now()
+    if current >= segment_end:
+    # if endtime - starttime >= VIDEO_SEGMENT_LEN:
         # Fayl nomini boshlanish va tugash vaqtiga qarab
-        start_time = starttime.strftime("%H%M%S")
-        end_time = endtime.strftime("%H%M%S")
-        fname = f"{start_time}_{end_time}"
+        # start_time = datetime.fromtimestamp(starttime).strftime("%Y%m%d_%H%M%S")
+        # end_time = datetime.fromtimestamp(endtime).strftime("%Y%m%d_%H%M%S")
+        # fname = f"{start_time}-{end_time}"
+        start_time_str = segment_start.strftime("%Y%m%d_%H%M%S")
+        end_time_str = segment_end.strftime("%Y%m%d_%H%M%S")
+        fname = f"{start_time_str}-{end_time_str}"
+        duration_sec = (segment_end - segment_start).total_seconds()
         output_file = f"{LOCAL_PATH}Inner_{fname}.mp4"
-        # audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
-        duration_sec = time.time() - starttime
+        audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
+        # duration_sec = time.time() - starttime
         FPS = len(frame_buffer)/duration_sec
         print("Real FPS",FPS)
-        save_upload_in_background(list(frame_buffer), output_file, FPS, {})
+        print("Buffer Len",len(frame_buffer))
+        save_upload_in_background(list(frame_buffer), output_file, FPS, {}, audio_file)
         frame_buffer.clear()
-        starttime = time.time()
+        segment_start = segment_end
+        segment_end = segment_start + timedelta(seconds=VIDEO_SEGMENT_LEN)
+        # starttime = time.time()
 
     try:
         cv2.namedWindow('Driver Monitor', cv2.WINDOW_NORMAL)

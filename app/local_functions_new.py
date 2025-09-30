@@ -17,10 +17,12 @@ os.environ["ULTRALYTICS_NO_CHECK"] = "1"
 
 load_dotenv()
 
+VIDEO_SEGMENT_LEN = int(os.getenv("VIDEO_SEGMENT_LEN"))
+
 # Global Constants
 AUDIO_SR = 44100
 CHANNELS = 1
-AUDIO_DURATION = 10
+AUDIO_DURATION = VIDEO_SEGMENT_LEN
 audio_buffer = deque(maxlen=AUDIO_SR * AUDIO_DURATION)
 recording = True
 
@@ -154,12 +156,12 @@ def save_video(buffer, output_file, fps, audio_file=None):
     height, width, _ = frames[0].shape
     command = [
         "ffmpeg", "-y", "-f", "rawvideo", "-vcodec", "rawvideo", "-pix_fmt", "bgr24",
-        "-s", f"{width}x{height}", "-i", "-"
+        "-s", f"{width}x{height}", "-r", str(fps), "-i", "-"
     ]
     if audio_file:
         command += ["-i", audio_file, "-c:a", "aac", "-b:a", "96k"]
 
-    command += ["-r", str(fps), "-c:v", "libx264", "-pix_fmt", "yuv420p",
+    command += ["-c:v", "libx264", "-pix_fmt", "yuv420p",
                 "-crf", "28", "-preset", "ultrafast", output_file]
 
     process = subprocess.Popen(command, stdin=subprocess.PIPE)
@@ -175,7 +177,7 @@ def save_upload_in_background(buffer, output_file, fps, json_body, audio_file=No
         save_video(buffer, output_file, fps, audio_file)
         if os.path.exists(audio_file):
             os.remove(audio_file)
-        # upload_to_server(output_file, json_body)
+        upload_to_server(output_file, json_body)
     threading.Thread(target=task, daemon=True).start()
 
 def getColours(cls_num):

@@ -13,6 +13,7 @@ from local_functions_new import (
     LANE_MODEL, 
     CAMERA_TYPE,
     AUDIO_DEVICE_FRONT,
+    VIDEO_SEGMENT_LEN,
     REF_IMAGES, 
     get_width, 
     getColours,
@@ -82,7 +83,11 @@ if is_windows:
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 else:
     if CAMERA_TYPE == "usb":
-        cap = cv2.VideoCapture(CAMERA_INDEX)
+        cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
+        cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
+        cap.set(cv2.CAP_PROP_FPS,30)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT,720)
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     elif CAMERA_TYPE == "csi":
@@ -99,15 +104,19 @@ detected_violations = set()
 detected_classes = set()
 is_buffer_ready = False
 
-VIDEO_SEGMENT_LEN = 10
 FPS = 30
 VIDEO_FRAME_LEN = VIDEO_SEGMENT_LEN*FPS
-frame_buffer =[]   #deque(maxlen=VIDEO_FRAME_LEN)
-starttime = time.time()
+frame_buffer = deque(maxlen=VIDEO_FRAME_LEN)
+# starttime = time.time()
+
+current = datetime.now()
+aligned_second = current.second - (current.second % VIDEO_SEGMENT_LEN)
+segment_start = current.replace(second=aligned_second, microsecond=0)
+segment_end = segment_start + timedelta(seconds=VIDEO_SEGMENT_LEN)
 
 # ---------------- START AUDIO ------------------
-# import threading
-# threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_FRONT,), daemon=True).start()
+import threading
+threading.Thread(target=audio_record_loop, args=(AUDIO_DEVICE_FRONT,), daemon=True).start()
 
 print("[INFO] Front camera started...")
 
@@ -154,6 +163,8 @@ while True:
                     cv2.putText(frame, f"Distance = {distance:.2f}m", (50, 50), fonts, 0.6, RED, 2)
                     cv2.rectangle(frame, (x1, y1), (x2, y2), (GREEN), 2)
                     cv2.putText(frame, f'{class_name} {conf:.2f}', (x1, y1), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (GREEN), 2)
+                    if distance < 3:
+                        class_buffer["follow_distance"][-1] = 1
             else:
                 colour = getColours(cls_id)
                 cv2.rectangle(frame, (x1, y1), (x2, y2), colour, 2)
@@ -175,24 +186,38 @@ while True:
                     detected_violations.add(cls)
                     class_buffer[cls].clear()
                     class_buffer[cls].extend([0] * buffer_len)
+        
+        if detected_violations:
+            detected_classes.update(detected_violations)
+            detected_violations.clear()
 
-    endtime = time.time()
-    if endtime - starttime >= VIDEO_SEGMENT_LEN:
+    # endtime = time.time()
+    current = datetime.now()
+    if current >= segment_end:
+    # if endtime - starttime >= VIDEO_SEGMENT_LEN:
         # Fayl nomini boshlanish va tugash vaqtiga qarab
-        start_time = starttime.strftime("%H%M%S")
-        end_time = endtime.strftime("%H%M%S")
-        fname = f"{start_time}_{end_time}"
+        # start_time = datetime.fromtimestamp(starttime).strftime("%Y%m%d_%H%M%S")
+        # end_time = datetime.fromtimestamp(endtime).strftime("%Y%m%d_%H%M%S")
+        # fname = f"{start_time}-{end_time}"
+        start_time_str = segment_start.strftime("%Y%m%d_%H%M%S")
+        end_time_str = segment_end.strftime("%Y%m%d_%H%M%S")
+        fname = f"{start_time_str}-{end_time_str}"
+        duration_sec = (segment_end - segment_start).total_seconds()
         output_file = f"{LOCAL_PATH}Front_{fname}.mp4"
-        # audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
-        duration_sec = time.time() - starttime
+        audio_file = f"{LOCAL_PATH}Inner_{fname}.wav"
+        # duration_sec = time.time() - starttime
         FPS = len(frame_buffer)/duration_sec
         print("Real FPS",FPS)
-        save_upload_in_background(list(frame_buffer), output_file, FPS, {})
+        save_upload_in_background(list(frame_buffer), output_file, FPS, {}, audio_file)
         frame_buffer.clear()
-        starttime = time.time()
+        segment_start = segment_end
+        segment_end = segment_start + timedelta(seconds=VIDEO_SEGMENT_LEN)
+        # starttime = time.time()
 
     # Display result
     try:
+        cv2.namedWindow('ADAS View', cv2.WINDOW_NORMAL)
+        cv2.resizeWindow('ADAS View', 960,540)
         cv2.imshow("ADAS View", frame)
         if cv2.waitKey(1) == ord("q"):
             break
