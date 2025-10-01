@@ -14,10 +14,12 @@ from local_functions_new import (
     CAMERA_TYPE,
     AUDIO_DEVICE_FRONT,
     VIDEO_SEGMENT_LEN,
-    REF_IMAGES, 
+    REF_IMAGES,
+    EVENT_CHOICE,
     get_width, 
     getColours,
     save_upload_in_background,
+    save_event_in_background,
     play_alert, 
     is_lane_departure_and_fast_lane, 
     audio_record_loop
@@ -190,6 +192,10 @@ while True:
         if detected_violations:
             detected_classes.update(detected_violations)
             detected_violations.clear()
+        
+        if detected_classes:
+            for event in detected_classes:
+                save_event_in_background(EVENT_CHOICE[event])
 
     # endtime = time.time()
     current = datetime.now()

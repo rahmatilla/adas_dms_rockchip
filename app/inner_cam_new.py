@@ -16,8 +16,10 @@ from local_functions_new import (
     CAMERA_TYPE,
     AUDIO_DEVICE_INNER,
     VIDEO_SEGMENT_LEN,
+    EVENT_CHOICE,
     getColours,
     save_upload_in_background,
+    save_event_in_background,
     play_alert,
     audio_record_loop
 )
@@ -27,7 +29,7 @@ CAMERA_INDEX = 2
 BUFFER_LEN = 20
 COOLDOWN_THRESHOLD = 30
 VIOLATION_CLASSES = {
-    'drinking', 'eating', 'eyes_closed', 'mobile_usage', 'no_seatbelt',
+    'drinking', 'eyes_closed', 'mobile_usage', 'no_seatbelt',
     'smoking', 'yawn', "inattentive_driving"
 }
 OBSTRUCTION_CLASSES = {
@@ -141,6 +143,10 @@ while True:
         # if not is_buffer_ready:
         #     frame_buffer = check_buffer(frame_buffer, VIDEO_FRAME_LEN // 2)
         #     is_buffer_ready = True
+    
+    if detected_classes:
+        for event in detected_classes:
+            save_event_in_background(EVENT_CHOICE[event])
 
     # endtime = time.time()
     current = datetime.now()

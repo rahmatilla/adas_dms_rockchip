@@ -12,7 +12,8 @@ from scp import SCPClient
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from collections import deque
-from api_request import upload_video
+from api_request import upload_video, send_driver_event
+import random
 
 os.environ["ULTRALYTICS_NO_CHECK"] = "1"
 
@@ -106,6 +107,22 @@ violation_sounds = {
     "main_road": f"{SOUND_PATH}main_road.mp3",
     "yield": f"{SOUND_PATH}yield_sign.mp3",
     "fast_lane": f"{SOUND_PATH}fast_lane.mp3",
+}
+
+EVENT_CHOICE = {
+    'drinking':'DRINKING', 
+    'eyes_closed':'DROWSY', 
+    'mobile_usage':'MOBILE_USAGE', 
+    'no_seatbelt':'NO_SEAT_BELT',
+    'smoking':'SMOKING', 
+    'yawn':'DROWSY', 
+    'inattentive_driving':'INATTENTIVE_DRIVING',
+    'lane_departure':'LANE_DEPARTURE', 
+    'fast_lane':'LEFT_LANE', 
+    'follow_distance':'FOLLOWING_DISTANCE', 
+    'shoulder_stop':'SHOULDER_STOP', 
+    'stop':'ROLLING_STOP',
+    'camera_obstructed':'CAMERA_OBSTRUCTED'
 }
 
 def audio_record_loop(AUDIO_DEVICE):
@@ -251,3 +268,67 @@ def is_lane_departure_and_fast_lane(model, frame, departure_threshold, frame_cen
     # # Нарисовать вертикальную линию в центре кадра (машина)
     # cv2.line(frame, (frame_center_x, 0), (frame_center_x, height), (200, 200, 200), 2)
     return frame, lanedeparture, fastlane
+
+#############################################################
+def get_cordinate():
+    return round(89.0 + random.uniform(-0.01, 0.01), 6), round(87.0 + random.uniform(-0.01, 0.01), 6)
+
+def get_distance():
+    return round(random.uniform(10.0, 15.0), 1)
+
+def get_state():
+    return "AR"
+
+def get_location():
+    return "Arzon State"
+
+def get_direction():
+    return random.choice(["N", "S", "E", "W", "NE", "NW", "SE", "SW"])
+
+def get_fuel_level_percent():
+    return random.randint(10, 100)
+
+def get_def_level_percent():
+    return random.randint(5, 50)
+
+def get_speed():
+    return random.randint(40, 120)
+
+
+def create_driver_event(event: str, global_event_id: str = None, status: str = "NEED_REVIEW"):
+    """
+    Build driver event payload using getter functions for all parameters except `event`.
+    """
+    if global_event_id is None:
+        global_event_id = f"GL-EVENT-{random.randint(100000, 999999)}"
+
+    device_datetime = datetime.now().isoformat()
+
+    latitude, longitude = get_cordinate()
+
+    return {
+        "globalEventId": global_event_id,
+        "event": event,
+        "status": status,
+        "deviceDateTime": device_datetime,
+        "latitude": latitude,
+        "longitude": longitude,
+        "distance": get_distance(),
+        "state": get_state(),
+        "location": get_location(),
+        "direction": get_direction(),
+        "fuelLevelPercent": get_fuel_level_percent(),
+        "defLevelPercent": get_def_level_percent(),
+        "speed": get_speed(),
+        "truck": {"id": 1},
+        "driver": {"id": 1}
+    }
+
+def save_event_in_background(event):
+    def task():
+        try:
+            payload = create_driver_event(event=event)
+            send_driver_event(payload)
+        except Exception as e:
+            print("Error during sending event:", str(e))
+    threading.Thread(target=task, daemon=True).start()
