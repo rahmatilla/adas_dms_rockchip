@@ -150,6 +150,8 @@ while True:
         # start_time = datetime.fromtimestamp(starttime).strftime("%Y%m%d_%H%M%S")
         # end_time = datetime.fromtimestamp(endtime).strftime("%Y%m%d_%H%M%S")
         # fname = f"{start_time}-{end_time}"
+        start_time = segment_start.strftime("%Y-%m-%d %H:%M:%S")
+        end_time   = segment_end.strftime("%Y-%m-%d %H:%M:%S")
         start_time_str = segment_start.strftime("%Y%m%d_%H%M%S")
         end_time_str = segment_end.strftime("%Y%m%d_%H%M%S")
         fname = f"{start_time_str}-{end_time_str}"
@@ -160,7 +162,14 @@ while True:
         FPS = len(frame_buffer)/duration_sec
         print("Real FPS",FPS)
         print("Buffer Len",len(frame_buffer))
-        save_upload_in_background(list(frame_buffer), output_file, FPS, {}, audio_file)
+        save_upload_in_background(buffer=list(frame_buffer), 
+                                  output_file=output_file, 
+                                  fps=FPS, 
+                                  start_time=start_time, 
+                                  end_time=end_time,
+                                  format="P720",
+                                  camera_type="INSIDE",
+                                  audio_file=audio_file)
         frame_buffer.clear()
         segment_start = segment_end
         segment_end = segment_start + timedelta(seconds=VIDEO_SEGMENT_LEN)

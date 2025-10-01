@@ -12,6 +12,7 @@ from scp import SCPClient
 from dotenv import load_dotenv
 from datetime import datetime, timedelta
 from collections import deque
+from api_request import upload_video
 
 os.environ["ULTRALYTICS_NO_CHECK"] = "1"
 
@@ -136,15 +137,9 @@ def check_buffer(buffer, frame_number):
         buffer.popleft()
     return buffer
 
-def upload_to_server(file_path, json_body):
+def upload_to_server(file_path, start_time, end_time, format, camera_type):
     try:
-        ssh = paramiko.SSHClient()
-        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-        ssh.connect(REMOTE_HOST, port=REMOTE_PORT, username=LOGIN, password=PASSWORD)
-        with SCPClient(ssh.get_transport()) as scp:
-            scp.put(file_path, REMOTE_PATH)
-        ssh.close()
-        # requests.post(url=URL, headers=headers, data=json_body, verify=False)
+        upload_video(file_path, start_time, end_time, format, camera_type)
     except Exception as e:
         print(f"Upload failed: {e}")
 
@@ -170,14 +165,14 @@ def save_video(buffer, output_file, fps, audio_file=None):
     process.stdin.close()
     process.communicate()
 
-def save_upload_in_background(buffer, output_file, fps, json_body, audio_file=None):
+def save_upload_in_background(buffer, output_file, fps, start_time, end_time, format, camera_type, audio_file=None):
     def task():
         if audio_file:
             save_audio_from_buffer(audio_file)
         save_video(buffer, output_file, fps, audio_file)
         if os.path.exists(audio_file):
             os.remove(audio_file)
-        upload_to_server(output_file, json_body)
+        upload_to_server(output_file, start_time, end_time, format, camera_type)
     threading.Thread(target=task, daemon=True).start()
 
 def getColours(cls_num):
