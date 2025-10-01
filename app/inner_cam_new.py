@@ -147,6 +147,7 @@ while True:
     if detected_classes:
         for event in detected_classes:
             save_event_in_background(EVENT_CHOICE[event])
+        detected_classes.clear()
 
     # endtime = time.time()
     current = datetime.now()
