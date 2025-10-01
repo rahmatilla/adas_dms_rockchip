@@ -307,6 +307,7 @@ def uploader_loop(conn, stop_event):
                 print(f"[UPLOAD] Sent {path}")
             else:
                 # status 'pending' qoladi → keyingi loopda qayta urinadi
+                mark_error(conn, path, err)
                 print(f"[UPLOAD] Failed {path}: {err}")
                 time.sleep(10)  # keyingi urinish oldidan kutish
 

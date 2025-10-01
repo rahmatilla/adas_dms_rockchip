@@ -22,8 +22,7 @@ from local_functions import (
 )
 
 # ---------------- CONFIG ------------------
-CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 10 #49
+CAMERA_INDEX = 2
 BUFFER_LEN = 20
 VIDEO_FRAME_LEN = 180  # 6 sec at 30 FPS
 VIOLATION_CLASSES = {
@@ -47,15 +46,15 @@ if is_windows:
     camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_DSHOW)
     camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
     camera.set(cv2.CAP_PROP_FPS,30)
-    camera.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
-    camera.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
+    camera.set(cv2.CAP_PROP_FRAME_WIDTH,1280)
+    camera.set(cv2.CAP_PROP_FRAME_HEIGHT,720)
 else:
     if CAMERA_TYPE == "usb":
-        camera = cv2.VideoCapture(CAMERA_INDEX_LINUX, cv2.CAP_V4L2)
+        camera = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
         camera.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         camera.set(cv2.CAP_PROP_FPS,30)
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
+        camera.set(cv2.CAP_PROP_FRAME_WIDTH,1280)
+        camera.set(cv2.CAP_PROP_FRAME_HEIGHT,720)
         print("FPS:", camera.get(cv2.CAP_PROP_FPS))
     elif CAMERA_TYPE == "csi":
         from nanocamera import Camera

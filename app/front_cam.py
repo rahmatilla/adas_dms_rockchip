@@ -24,8 +24,7 @@ from local_functions import (
 from collections import deque
 
 # Detect platform and set camera source
-CAMERA_INDEX = 1
-CAMERA_INDEX_LINUX = 11
+CAMERA_INDEX = 6
 os_name = platform.system()
 is_windows = os_name == 'Windows'
 COOLDOWN_THRESHOLD = 30
@@ -89,11 +88,11 @@ if is_windows:
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
 else:
     if CAMERA_TYPE == "usb":
-        cap = cv2.VideoCapture(CAMERA_INDEX_LINUX, cv2.CAP_V4L2)
+        cap = cv2.VideoCapture(CAMERA_INDEX, cv2.CAP_V4L2)
         cap.set(cv2.CAP_PROP_FOURCC, cv2.VideoWriter_fourcc(*"MJPG"))
         cap.set(cv2.CAP_PROP_FPS,30)
-        cap.set(cv2.CAP_PROP_FRAME_WIDTH,1920)
-        cap.set(cv2.CAP_PROP_FRAME_HEIGHT,1080)
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH,1280)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT,780)
         print("FPS:", cap.get(cv2.CAP_PROP_FPS))
         frame_width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
