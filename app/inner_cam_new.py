@@ -6,6 +6,7 @@ import platform
 from collections import deque
 from datetime import datetime, timedelta
 from ultralytics import YOLO
+from task_manager import enqueue_video, enqueue_event
 
 from local_functions_new import (
     check_buffer,
@@ -146,7 +147,8 @@ while True:
     
     if detected_classes:
         for event in detected_classes:
-            save_event_in_background(EVENT_CHOICE[event])
+            # save_event_in_background(EVENT_CHOICE[event])
+            enqueue_event(EVENT_CHOICE[event])
         detected_classes.clear()
 
     # endtime = time.time()
@@ -169,14 +171,24 @@ while True:
         FPS = len(frame_buffer)/duration_sec
         print("Real FPS",FPS)
         print("Buffer Len",len(frame_buffer))
-        save_upload_in_background(buffer=list(frame_buffer), 
-                                  output_file=output_file, 
-                                  fps=FPS, 
-                                  start_time=start_time, 
-                                  end_time=end_time,
-                                  format="P720",
-                                  camera_type="INSIDE",
-                                  audio_file=audio_file)
+        # save_upload_in_background(buffer=list(frame_buffer), 
+        #                           output_file=output_file, 
+        #                           fps=FPS, 
+        #                           start_time=start_time, 
+        #                           end_time=end_time,
+        #                           format="P720",
+        #                           camera_type="INSIDE",
+        #                           audio_file=audio_file)
+        enqueue_video(
+                        buffer=list(frame_buffer),
+                        output_file=output_file,
+                        fps=FPS,
+                        start_time=start_time,
+                        end_time=end_time,
+                        format="P720",
+                        camera_type="INSIDE",
+                        audio_file=audio_file
+                    )
         frame_buffer.clear()
         segment_start = segment_end
         segment_end = segment_start + timedelta(seconds=VIDEO_SEGMENT_LEN)
